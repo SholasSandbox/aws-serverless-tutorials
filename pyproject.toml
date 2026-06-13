@@ -1,0 +1,18 @@
+[project]
+name = "handlers"
+version = "0.1.0"
+description = "Python and AWS serverless tutorial exercises"
+requires-python = ">=3.12"
+
+# Runtime dependency — mocked in tests, real in any controlled lab exercise
+dependencies = [
+    "boto3==1.43.28",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest==9.0.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

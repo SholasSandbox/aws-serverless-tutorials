@@ -1,0 +1,43 @@
+{
+    "Comment": "Lesson 17 trade validation workflow with Lambda task output",
+    "StartAt": "ReceiveTrade",
+    "States": {
+        "ReceiveTrade": {
+            "Type": "Pass",
+            "Next": "ValidateTrade"
+        },
+        "ValidateTrade": {
+            "Type": "Task",
+            "Resource": "arn:aws:lambda:eu-west-2:123456789012:function:validate-trade",
+            "ResultPath": "$.validation",
+            "Next": "IsTradeValid"
+        },
+        "IsTradeValid": {
+            "Type": "Choice",
+            "Choices": [
+                {
+                    "Variable": "$.validation.is_valid",
+                    "BooleanEquals": true,
+                    "Next": "AcceptedTrade"
+                },
+                {
+                    "Variable": "$.validation.is_valid",
+                    "BooleanEquals": false,
+                    "Next": "RejectedTrade"
+                }
+            ],
+            "Default": "InvalidWorkflowInput"
+        },
+        "AcceptedTrade": {
+            "Type": "Succeed"
+        },
+        "RejectedTrade": {
+            "Type": "Succeed"
+        },
+        "InvalidWorkflowInput": {
+            "Type": "Fail",
+            "Error": "InvalidWorkflowInput",
+            "Cause": "The validation task did not return a valid validation result"
+        }
+    }
+}

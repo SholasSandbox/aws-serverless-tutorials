@@ -1,0 +1,37 @@
+{
+  "Comment": "Lesson 16 basic trade validation workflow",
+  "StartAt": "ReceiveTrade",
+  "States": {
+    "ReceiveTrade": {
+      "Type": "Pass",
+      "Next": "IsTradeValid"
+    },
+    "IsTradeValid": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.is_valid",
+          "BooleanEquals": true,
+          "Next": "AcceptedTrade"
+        },
+        {
+          "Variable": "$.is_valid",
+          "BooleanEquals": false,
+          "Next": "RejectedTrade"
+        }
+      ],
+      "Default": "InvalidWorkflowInput"
+    },
+    "AcceptedTrade": {
+      "Type": "Succeed"
+    },
+    "RejectedTrade": {
+      "Type": "Succeed"
+    },
+    "InvalidWorkflowInput": {
+      "Type": "Fail",
+      "Error": "InvalidWorkflowInput",
+      "Cause": "The workflow input did not include a valid boolean is_valid field"
+    }
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "trade_id": "TRD-001",
+  "status": "accepted",
+  "reason": null,
+  "received_trade": {
+    "trade_id": "TRD-001",
+    "product": "PPA",
+    "volume_mwh": 100
+  },
+  "processed_at": "2026-06-02T10:30:00Z"
+}
