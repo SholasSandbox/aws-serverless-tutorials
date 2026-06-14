@@ -1,8 +1,6 @@
 import pytest
 from unittest.mock import Mock
 
-from trade_persistence_handler import trade_persistence_handler
-
 import trade_persistence_handler as handler_module
 
 
@@ -10,29 +8,25 @@ def test_trade_persistence_handler_persists_accepted_trade_result():
     s3_client = Mock()
     dynamodb_table = Mock()
 
-    trade = {
-        "trade_id": "TRD-001",
-        "product": "POWER",
-        "volume_mwh": 100,
-    }
-
-    validation = {
-        "is_valid": True,
-        "errors": [],
-    }
-
     event = {
-        "trade": trade,
-        "validation": validation,
+        "trade": {
+            "trade_id": "TRD-001",
+            "product": "POWER",
+            "volume_mwh": 100,
+        },
+        "validation": {
+            "is_valid": True,
+            "errors": [],
+        },
         "processed_at": "2026-06-02T18:30:00Z",
-        "bucket_name": "test-results-bucket",
     }
 
-    response = trade_persistence_handler(
+    response = handler_module.trade_persistence_handler(
         event,
         None,
         s3_client=s3_client,
         dynamodb_table=dynamodb_table,
+        bucket_name="test-results-bucket",
     )
 
     expected_s3_key = (
@@ -57,29 +51,25 @@ def test_trade_persistence_handler_persists_rejected_trade_result():
     s3_client = Mock()
     dynamodb_table = Mock()
 
-    trade = {
-        "trade_id": "TRD-001",
-        "product": "POWER",
-        "volume_mwh": 0,
-    }
-
-    validation = {
-        "is_valid": False,
-        "errors": ["volume_mwh must be greater than 0"],
-    }
-
     event = {
-        "trade": trade,
-        "validation": validation,
+        "trade": {
+            "trade_id": "TRD-001",
+            "product": "POWER",
+            "volume_mwh": 0,
+        },
+        "validation": {
+            "is_valid": False,
+            "errors": ["volume_mwh must be greater than 0"],
+        },
         "processed_at": "2026-06-02T18:30:00Z",
-        "bucket_name": "test-results-bucket",
     }
 
-    response = trade_persistence_handler(
+    response = handler_module.trade_persistence_handler(
         event,
         None,
         s3_client=s3_client,
         dynamodb_table=dynamodb_table,
+        bucket_name="test-results-bucket",
     )
 
     expected_s3_key = (
@@ -100,48 +90,76 @@ def test_trade_persistence_handler_persists_rejected_trade_result():
     }
 
 
-def test_trade_persistence_handler_rejects_missing_bucket_name():
+def test_trade_persistence_handler_rejects_missing_processed_at():
     s3_client = Mock()
     dynamodb_table = Mock()
 
-    trade = {
-        "trade_id": "TRD-001",
-        "product": "POWER",
-        "volume_mwh": 100,
-    }
-
-    validation = {
-        "is_valid": False,
-        "errors": [],
-    }
-
     event = {
-        "trade": trade,
-        "validation": validation,
-        "processed_at": "2026-06-02T18:30:00Z",
+        "trade": {
+            "trade_id": "TRD-001",
+            "product": "POWER",
+            "volume_mwh": 100,
+        },
+        "validation": {
+            "is_valid": False,
+            "errors": [],
+        },
     }
+
     with pytest.raises(
         ValueError,
-        match="Missing event field: bucket_name",
+        match="Missing event field: processed_at",
     ):
-        trade_persistence_handler(
+        handler_module.trade_persistence_handler(
             event,
             None,
             s3_client=s3_client,
             dynamodb_table=dynamodb_table,
+            bucket_name="test-results-bucket",
         )
 
     s3_client.put_object.assert_not_called()
     dynamodb_table.put_item.assert_not_called()
 
 
-def test_lambda_handler_creates_aws_clients_and_delegates(monkeypatch):
+def test_build_persistence_dependencies_uses_environment_and_boto3(monkeypatch):
     s3_client = Mock()
     dynamodb_resource = Mock()
     dynamodb_table = Mock()
-    context = Mock()
 
     dynamodb_resource.Table.return_value = dynamodb_table
+
+    fake_boto3 = Mock()
+    fake_boto3.client.return_value = s3_client
+    fake_boto3.resource.return_value = dynamodb_resource
+
+    monkeypatch.setenv(
+        handler_module.TRADE_RESULTS_BUCKET_ENV_VAR,
+        "test-results-bucket",
+    )
+    monkeypatch.setenv(
+        handler_module.TRADE_STATUS_TABLE_ENV_VAR,
+        "trade-status-table",
+    )
+    monkeypatch.setattr(handler_module, "boto3", fake_boto3)
+
+    dependencies = handler_module.build_persistence_dependencies()
+
+    fake_boto3.client.assert_called_once_with("s3")
+    fake_boto3.resource.assert_called_once_with("dynamodb")
+    dynamodb_resource.Table.assert_called_once_with("trade-status-table")
+
+    assert dependencies == {
+        "s3_client": s3_client,
+        "dynamodb_table": dynamodb_table,
+        "bucket_name": "test-results-bucket",
+    }
+
+
+def test_lambda_handler_builds_dependencies_and_delegates(monkeypatch):
+    s3_client = Mock()
+    dynamodb_table = Mock()
+    context = Mock()
 
     event = {
         "trade": {
@@ -154,7 +172,6 @@ def test_lambda_handler_creates_aws_clients_and_delegates(monkeypatch):
             "errors": [],
         },
         "processed_at": "2026-06-02T18:30:00Z",
-        "bucket_name": "test-results-bucket",
     }
 
     expected_response = {
@@ -169,21 +186,19 @@ def test_lambda_handler_creates_aws_clients_and_delegates(monkeypatch):
         ),
     }
 
-    fake_boto3 = Mock()
-    fake_boto3.client.return_value = s3_client
-    fake_boto3.resource.return_value = dynamodb_resource
+    fake_dependencies = {
+        "s3_client": s3_client,
+        "dynamodb_table": dynamodb_table,
+        "bucket_name": "test-results-bucket",
+    }
 
-    def fake_trade_persistence_handler(
-        event,
-        context,
-        *,
-        s3_client,
-        dynamodb_table,
-    ):
-        return expected_response
+    fake_trade_persistence_handler = Mock(return_value=expected_response)
 
-    monkeypatch.setenv("TRADE_STATUS_TABLE_NAME", "trade-status-table")
-    monkeypatch.setattr(handler_module, "boto3", fake_boto3)
+    monkeypatch.setattr(
+        handler_module,
+        "build_persistence_dependencies",
+        Mock(return_value=fake_dependencies),
+    )
     monkeypatch.setattr(
         handler_module,
         "trade_persistence_handler",
@@ -192,8 +207,47 @@ def test_lambda_handler_creates_aws_clients_and_delegates(monkeypatch):
 
     response = handler_module.lambda_handler(event, context)
 
-    fake_boto3.client.assert_called_once_with("s3")
-    fake_boto3.resource.assert_called_once_with("dynamodb")
-    dynamodb_resource.Table.assert_called_once_with("trade-status-table")
+    handler_module.build_persistence_dependencies.assert_called_once_with()
+    fake_trade_persistence_handler.assert_called_once_with(
+        event,
+        context,
+        s3_client=s3_client,
+        dynamodb_table=dynamodb_table,
+        bucket_name="test-results-bucket",
+    )
 
     assert response == expected_response
+
+
+def test_build_persistence_dependencies_requires_results_bucket_env(monkeypatch):
+    monkeypatch.delenv(
+        handler_module.TRADE_RESULTS_BUCKET_ENV_VAR,
+        raising=False,
+    )
+    monkeypatch.setenv(
+        handler_module.TRADE_STATUS_TABLE_ENV_VAR,
+        "trade-status-table",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Missing environment variable: TRADE_RESULTS_BUCKET",
+    ):
+        handler_module.build_persistence_dependencies()
+
+
+def test_build_persistence_dependencies_requires_status_table_env(monkeypatch):
+    monkeypatch.delenv(
+        handler_module.TRADE_STATUS_TABLE_ENV_VAR,
+        raising=False,
+    )
+    monkeypatch.setenv(
+        handler_module.TRADE_RESULTS_BUCKET_ENV_VAR,
+        "test-results-bucket",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="Missing environment variable: TRADE_STATUS_TABLE_NAME",
+    ):
+        handler_module.build_persistence_dependencies()
