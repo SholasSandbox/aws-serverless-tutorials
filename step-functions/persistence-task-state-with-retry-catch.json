@@ -1,0 +1,45 @@
+{
+  "PersistTradeResult": {
+    "Type": "Task",
+    "Resource": "arn:aws:states:::lambda:invoke",
+    "Parameters": {
+      "FunctionName": "trade-persistence-handler",
+      "Payload.$": "$"
+    },
+    "ResultSelector": {
+      "trade_id.$": "$.Payload.trade_id",
+      "status.$": "$.Payload.status",
+      "result_type.$": "$.Payload.result_type",
+      "s3_bucket.$": "$.Payload.s3_bucket",
+      "s3_key.$": "$.Payload.s3_key"
+    },
+    "ResultPath": "$.persistence",
+    "Retry": [
+      {
+        "ErrorEquals": [
+          "Lambda.ServiceException",
+          "Lambda.AWSLambdaException",
+          "Lambda.SdkClientException",
+          "Lambda.TooManyRequestsException",
+          "States.Timeout"
+        ],
+        "IntervalSeconds": 2,
+        "MaxAttempts": 3,
+        "BackoffRate": 2.0
+      }
+    ],
+    "Catch": [
+      {
+        "ErrorEquals": ["States.ALL"],
+        "ResultPath": "$.persistence_error",
+        "Next": "PersistenceFailed"
+      }
+    ],
+    "Next": "SucceedState"
+  },
+  "PersistenceFailed": {
+    "Type": "Fail",
+    "Error": "PersistenceTaskFailed",
+    "Cause": "Trade persistence task failed after retries"
+  }
+}

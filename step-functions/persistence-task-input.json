@@ -1,0 +1,12 @@
+{
+  "trade": {
+    "trade_id": "TRD-001",
+    "product": "POWER",
+    "volume_mwh": 100
+  },
+  "validation": {
+    "is_valid": true,
+    "errors": []
+  },
+  "processed_at": "2026-06-02T18:30:00Z"
+}

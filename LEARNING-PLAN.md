@@ -33,8 +33,8 @@ explained without relying on the tutorial prompt.
 | DynamoDB status records | Implemented | `trade_status_persistence.py`, corresponding tests |
 | Combined S3 and DynamoDB persistence | Implemented | workflow/handler modules and tests |
 | Repository documentation and governance | Implemented | `README.md`, `AGENTS.md`, this plan |
-| Test baseline | Verified | 152 tests passed on 2026-06-13 with `.venv/bin/python -m pytest -q` |
-| Intentional Git baseline | Not started | Workspace is not currently a Git repository |
+| Test baseline | Verified | 163 tests passed on 2026-06-16 with `.venv/bin/python -m pytest -q` |
+| Intentional Git baseline | Implemented | Repository initialised; `.gitignore` covers `.venv`, caches, bytecode, `.DS_Store`, and `archive/` |
 
 ## Active Sequence
 
@@ -42,10 +42,10 @@ explained without relying on the tutorial prompt.
 
 - [x] Run the complete pytest suite and record the baseline result: 152 tests
   passed on 2026-06-13 with `.venv/bin/python -m pytest -q`.
-- [ ] Remove or classify scratch files such as `test2.py`, `test3.py`,
+- [x] Remove or classify scratch files such as `test2.py`, `test3.py`,
   `test_event.py`, `manual_import_check.py`, and `Stepping/`.
-- [ ] Add a minimal dependency file or `pyproject.toml` for reproducible setup.
-- [ ] Add `.gitignore` coverage for `.venv`, caches, bytecode, and `.DS_Store`.
+- [x] Add a minimal dependency file or `pyproject.toml` for reproducible setup.
+- [x] Add `.gitignore` coverage for `.venv`, caches, bytecode, and `.DS_Store`.
 - [ ] Standardize formatting and import order without obscuring lesson intent.
 
 ### 2. Strengthen Python production shape
@@ -65,7 +65,7 @@ explained without relying on the tutorial prompt.
   source.
 - [ ] Add an explicit SQS poison-message and DLQ design exercise.
 - [ ] Test mixed-success SQS batches and partial batch failure semantics.
-- [ ] Add Step Functions timeout, retry, catch, and terminal-failure examples.
+- [x] Add Step Functions timeout, retry, catch, and terminal-failure examples.
 - [ ] Compare EventBridge, SQS, and direct Step Functions invocation in a
   decision table.
 
