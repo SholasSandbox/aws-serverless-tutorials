@@ -121,4 +121,4 @@ def build_s3_key(
         f"trade_id={safe_trade_id}.json"
     )
 
-    
+

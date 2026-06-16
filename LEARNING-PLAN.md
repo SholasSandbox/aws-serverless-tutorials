@@ -46,7 +46,7 @@ explained without relying on the tutorial prompt.
   `test_event.py`, `manual_import_check.py`, and `Stepping/`.
 - [x] Add a minimal dependency file or `pyproject.toml` for reproducible setup.
 - [x] Add `.gitignore` coverage for `.venv`, caches, bytecode, and `.DS_Store`.
-- [ ] Standardize formatting and import order without obscuring lesson intent.
+- [x] Standardize formatting and import order without obscuring lesson intent.
 
 ### 2. Strengthen Python production shape
 

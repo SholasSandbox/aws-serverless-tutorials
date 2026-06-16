@@ -16,7 +16,7 @@ UNKNOWN_REQUEST_ID = "unknown-request-id"
 STATUS_RECEIVED = "received"
 
 
-def parse_json_body(event: dict[str, Any]) -> dict[str, Any] | None:  
+def parse_json_body(event: dict[str, Any]) -> dict[str, Any] | None:
     body = event.get("body")
 
     if body is None:
@@ -107,7 +107,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     request_id = None
 
     try:
-        request_id = get_request_id(event, context)  
+        request_id = get_request_id(event, context)
 
         logger.info("Received trade request request_id=%s", request_id)
         request_body = parse_json_body(event)
@@ -117,13 +117,13 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             return error_response(ERROR_INVALID_JSON_BODY, request_id)
 
         missing_field = find_missing_required_field(request_body, REQUIRED_FIELDS)
-        
+
         if missing_field is not None:
             logger.warning("Missing required field: %s request_id=%s", missing_field, request_id)
             return error_response(f"Missing required field: {missing_field}", request_id)
 
         volume_mwh = request_body["volume_mwh"]
-        
+
         volume_mwh_error = validate_volume_mwh(volume_mwh)
         if volume_mwh_error is not None:
             logger.warning("Invalid volume_mwh: %s request_id=%s", volume_mwh_error, request_id)
@@ -148,5 +148,5 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "Unexpected error while processing trade request request_id=%s",
             request_id,
         )
-        
+
         return internal_error_response(request_id)

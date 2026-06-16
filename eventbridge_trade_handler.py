@@ -29,7 +29,7 @@ def eventbridge_trade_handler(event: dict[str, Any], context: Any) -> dict[str, 
             "error": "Missing or invalid event detail"
         }
 
-    missing_field = find_missing_required_field(trade,REQUIRED_FIELDS)
+    missing_field = find_missing_required_field(trade, REQUIRED_FIELDS)
     if missing_field is not None:
         logger.warning(
             "Invalid trade event: missing required field",

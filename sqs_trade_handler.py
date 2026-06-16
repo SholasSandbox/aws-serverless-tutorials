@@ -49,6 +49,7 @@ def record_accepted(message_id: str, trade: dict[str, Any]) -> None:
         trade.get("trade_id"),
     )
 
+
 def sqs_trade_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     records = event.get("Records") or []
 
@@ -77,14 +78,14 @@ def sqs_trade_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         if volume_mwh_error is not None:
             record_rejection(message_id, volume_mwh_error, body)
             continue
-        
+
         try:
-            persist_trade(trade) 
+            persist_trade(trade)
         except Exception:
             logger.exception("Failed to persist trade message_id=%s", message_id)
             batch_item_failures.append(batch_item_failure(message_id))
             continue
-        
+
         record_accepted(message_id, trade)
 
     return {"batchItemFailures": batch_item_failures}
