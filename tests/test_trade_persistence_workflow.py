@@ -220,3 +220,49 @@ def test_persist_trade_processing_result_rejects_validation_is_valid_not_boolean
 
     s3_client.put_object.assert_not_called()
     dynamodb_table.put_item.assert_not_called()
+
+
+def test_persistence_workflow_can_be_retried_without_changing_success_contract():
+    s3_client = Mock()
+    dynamodb_table = Mock()
+
+    trade = {
+        "trade_id": "TRD-001",
+        "product": "POWER",
+        "volume_mwh": 100,
+    }
+    validation = {
+        "is_valid": True,
+        "errors": [],
+    }
+
+    processed_at = "2026-06-16T20:00:00Z"
+
+    first_result = persist_trade_processing_result(
+        trade=trade,
+        validation=validation,
+        processed_at=processed_at,
+        s3_client=s3_client,
+        dynamodb_table=dynamodb_table,
+        bucket_name="trade-results-bucket",
+    )
+
+    second_result = persist_trade_processing_result(
+        trade=trade,
+        validation=validation,
+        processed_at=processed_at,
+        s3_client=s3_client,
+        dynamodb_table=dynamodb_table,
+        bucket_name="trade-results-bucket",
+    )
+
+    assert second_result == first_result
+
+    assert first_result["trade_id"] == "TRD-001"
+    assert first_result["result_type"] == "accepted"
+    assert first_result["s3_bucket"] == "trade-results-bucket"
+    assert first_result["s3_key"] == (
+        "trade-results/accepted/year=2026/month=06/day=16/"
+        "trade_id=TRD-001.json"
+    )
+    assert second_result["s3_key"] == first_result["s3_key"]

@@ -11,7 +11,7 @@ from trade_status_persistence import (
     RESULT_TYPE_ACCEPTED,
     RESULT_TYPE_REJECTED,
     build_trade_status_record_from_artifact,
-    put_trade_status_record,
+    persist_trade_status_record,
 )
 
 
@@ -70,7 +70,7 @@ def persist_trade_processing_result(
         s3_pointer=s3_pointer,
     )
 
-    put_trade_status_record(
+    persist_trade_status_record(
         dynamodb_table=dynamodb_table,
         status_record=status_record,
     )

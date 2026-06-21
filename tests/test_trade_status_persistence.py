@@ -13,8 +13,12 @@ from trade_result_persistence import (
 from trade_status_persistence import (
     build_trade_status_record,
     build_trade_status_record_from_artifact,
-    put_trade_status_record,
+    persist_trade_status_record,
 )
+
+
+class FakeConditionalCheckFailedException(Exception):
+    pass
 
 
 def test_build_trade_status_record_for_accepted_trade():
@@ -64,8 +68,8 @@ def test_build_trade_status_record_for_rejected_trade():
         "schema_version": "1.0",
     }
 
-
-def test_put_trade_status_record_calls_dynamodb_put_item():
+#Revisit this test, after 2 other lesson 26 tests completed
+def test_persist_trade_status_record_calls_dynamodb_put_item():
     dynamodb_table = Mock()
 
     status_record = {
@@ -79,17 +83,18 @@ def test_put_trade_status_record_calls_dynamodb_put_item():
         "schema_version": "1.0",
     }
 
-    put_trade_status_record(
+    persist_trade_status_record(
         dynamodb_table=dynamodb_table,
         status_record=status_record,
     )
 
     dynamodb_table.put_item.assert_called_once_with(
-        Item=status_record
+        Item=status_record,
+        ConditionExpression="attribute_not_exists(trade_id)",      
     )
 
 
-def test_put_trade_status_record_returns_stable_response():
+def test_persist_trade_status_record_returns_stable_response():
     dynamodb_table = Mock()
     dynamodb_table.put_item.return_value = {
         "ResponseMetadata": {
@@ -108,7 +113,7 @@ def test_put_trade_status_record_returns_stable_response():
         "schema_version": "1.0",
     }
 
-    response = put_trade_status_record(
+    response = persist_trade_status_record(
         dynamodb_table=dynamodb_table,
         status_record=status_record,
     )
@@ -207,7 +212,7 @@ def test_build_trade_status_record_from_artifact_rejects_missing_schema_version(
         "artifact_type": ARTIFACT_TYPE_ACCEPTED,
         "status": STATUS_ACCEPTED,
         "trade_id": "TRD-001",
-        "processed_at": "2026-06-02T18:30:00Z",
+        "processed_at": "2026-06-02T18:30:00Z",      
         "trade": {
             "trade_id": "TRD-001",
             "product": "POWER",
@@ -384,3 +389,87 @@ def test_build_trade_status_record_from_artifact_rejects_rejected_artifact_with_
             artifact=artifact,
             s3_pointer=s3_pointer,
         )
+
+
+def test_persist_trade_status_uses_conditional_put_for_new_trade_status():
+    table = Mock()
+
+    status_record = {
+        "trade_id": "TRD-001",
+        "result_type": "ACCEPTED",
+        "status": "persisted",
+        "s3_bucket": "trade-results-bucket",
+        "s3_key": "results/accepted/trade_id=TRD-001/result.json",
+        "processed_at": "2026-06-16T20:00:00Z",
+
+    }
+
+    persist_trade_status_record(dynamodb_table=table, status_record=status_record)
+
+    table.put_item.assert_called_once()
+
+    put_call = table.put_item.call_args.kwargs
+
+    assert put_call["Item"] == status_record
+    assert put_call["ConditionExpression"] == "attribute_not_exists(trade_id)"
+
+
+def test_persist_trade_status_treats_duplicate_trade_status_as_idempotent_success():
+    table = Mock()
+
+    status_record = {
+        "trade_id": "TRD-001",
+        "result_type": "ACCEPTED",
+        "status": "persisted",
+        "s3_bucket": "trade-results-bucket",
+        "s3_key": "results/accepted/trade_id=TRD-001/result.json",
+        "processed_at": "2026-06-16T20:00:00Z",
+    }
+
+    table.put_item.side_effect = FakeConditionalCheckFailedException(
+        "Conditional check failed"
+    )
+
+    result = persist_trade_status_record(
+        dynamodb_table=table,
+        status_record=status_record,
+        conditional_check_failed_exception=FakeConditionalCheckFailedException,        
+    )
+
+    assert result == {
+        "status": "already_persisted",
+        "trade_id": "TRD-001",
+        "result_type": "ACCEPTED",
+    }
+
+    table.put_item.assert_called_once_with(
+        Item=status_record,
+        ConditionExpression="attribute_not_exists(trade_id)",      
+    )
+
+
+def test_save_trade_status_does_not_swallow_unexpected_dynamodb_errors():
+    table = Mock()
+
+    status_record = {
+        "trade_id": "TRD-001",
+        "result_type": "ACCEPTED",
+        "status": "persisted",
+        "s3_bucket": "trade-results-bucket",
+        "s3_key": "results/accepted/trade_id=TRD-001/result.json",
+        "processed_at": "2026-06-16T20:00:00Z",
+    }
+
+    table.put_item.side_effect = RuntimeError("DynamoDB unavailable")
+
+    with pytest.raises(RuntimeError, match="DynamoDB unavailable"):
+        persist_trade_status_record(
+            dynamodb_table=table,
+            status_record=status_record,
+
+        )
+
+    table.put_item.assert_called_once_with(
+        Item=status_record,
+        ConditionExpression="attribute_not_exists(trade_id)",
+    )

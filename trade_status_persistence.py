@@ -34,15 +34,25 @@ def build_trade_status_record(
     }
 
 
-def put_trade_status_record(
+def persist_trade_status_record(
     *,
     dynamodb_table: Any,
     status_record: dict[str, Any],
+    conditional_check_failed_exception: type[Exception] | tuple[type[Exception], ...] = ()
 ) -> dict[str, Any]:
-    dynamodb_table.put_item(
-        Item=status_record,
-    )
+    try:
+        dynamodb_table.put_item(
+            Item=status_record,
+            ConditionExpression="attribute_not_exists(trade_id)",        
+        )
 
+    except conditional_check_failed_exception:
+        return {
+            "trade_id": status_record["trade_id"],
+            "result_type": status_record["result_type"],
+            "status": "already_persisted",
+        }
+        
     return {
         "trade_id": status_record["trade_id"],
         "processed_at": status_record["processed_at"],

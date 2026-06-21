@@ -153,3 +153,28 @@ def test_build_s3_key_sanitises_trade_id():
         "year=2026/month=06/day=02/"
         "trade_id=TRD-001-bad.json"
     )
+
+
+def test_s3_result_key_is_deterministic_for_same_trade_result():
+    trade_id = "TRD-001"
+    result_type = "accepted"
+    processed_at = "2026-06-16T20:00:00Z"
+
+    first_key = build_s3_key(
+        result_type=result_type,
+        trade_id=trade_id,
+        processed_at=processed_at,
+    )
+
+    second_key = build_s3_key(
+        result_type=result_type,
+        trade_id=trade_id,
+        processed_at=processed_at,
+    )
+
+    assert second_key == first_key
+    assert first_key == (
+        "trade-results/accepted/year=2026/month=06/day=16/"
+        "trade_id=TRD-001.json"
+    )
+    
