@@ -35,6 +35,7 @@ explained without relying on the tutorial prompt.
 | Repository documentation and governance | Implemented | `README.md`, `AGENTS.md`, this plan |
 | Test baseline | Verified | 168 tests passed on 2026-06-21 with `.venv/bin/python -m pytest -q` |
 | Intentional Git baseline | Implemented | Repository initialised; `.gitignore` covers `.venv`, caches, bytecode, `.DS_Store`, and `archive/` |
+| Consolidation review | Implemented | Import order, formatting, trailing whitespace, dead comments, stale README note, and empty archive file resolved in Lesson 27 |
 
 ## Active Sequence
 
@@ -47,7 +48,6 @@ explained without relying on the tutorial prompt.
 - [x] Add a minimal dependency file or `pyproject.toml` for reproducible setup.
 - [x] Add `.gitignore` coverage for `.venv`, caches, bytecode, and `.DS_Store`.
 - [x] Standardize formatting and import order without obscuring lesson intent.
-
 ### 2. Strengthen Python production shape
 
 - [ ] Introduce typed event/result helpers only where they reduce repeated
@@ -116,6 +116,43 @@ Caveat:
 - no AWS resources were deployed.
 
 SAP-C02 mapping: Domain 2 resilience and Domain 3 continuous improvement.
+This is tutorial evidence only, not Energy Data Lakehouse implementation.
+
+### Lesson 27: Consolidation review
+
+Status: **Completed locally on 2026-06-21**.
+
+Evidence:
+
+- naming review: all public function names are consistent with their module
+  contract; no renames required;
+- formatting review: trailing whitespace removed from `trade_status_persistence.py`
+  (`ConditionExpression` line and extra blank line after `except` block);
+  double trailing blank lines removed from `trade_result_persistence.py` and
+  `trade_status_persistence.py`;
+- import review: `test_trade_handler.py` import block reordered to stdlib →
+  third-party → local; `test_sqs_trade_handler.py` import block consolidated
+  and tightened; `test_eventbridge_trade_handler.py` missing blank line between
+  tests added;
+- scratch file classification: `archive/` contents confirmed as early lesson
+  artifacts; empty `archive/json` file deleted; `lesson_1a_lambda_response.py`
+  annotated with a clarifying header comment;
+- conftest.py dead commented-out code removed;
+- `test_trade_status_persistence.py` inline comment spacing fixed;
+- `README.md` stale git-status note updated to reflect the initialised
+  repository;
+- `.gitignore` and `pyproject.toml` confirmed clean; no changes needed;
+- full local suite passed: 168 tests.
+
+Weak area noted:
+
+- `lesson_1a_lambda_response.py` remains as an incomplete lesson artifact;
+  it calls undefined test functions and would fail if executed directly;
+  consider replacing it with a complete early-lesson example in a future
+  exercise.
+
+SAP-C02 mapping: Domain 3 operational excellence (code hygiene, reproducible
+setup, structured evidence).
 This is tutorial evidence only, not Energy Data Lakehouse implementation.
 
 ## Parked Topics

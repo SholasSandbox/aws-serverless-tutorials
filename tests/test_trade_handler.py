@@ -1,7 +1,7 @@
-import trade_handler
 import json
 import pytest
 
+import trade_handler
 from trade_handler import (
     lambda_handler,
     find_missing_required_field,
@@ -11,9 +11,7 @@ from trade_handler import (
     get_request_id,
 )
 
-from eventbridge_trade_handler import ( 
-    eventbridge_trade_handler
-)
+from eventbridge_trade_handler import eventbridge_trade_handler
 
 REQUIRED_FIELDS = ["trade_id", "product", "volume_mwh"]
 
@@ -31,7 +29,7 @@ TEST_PRODUCT = "UK Power"
 TEST_VOLUME_MWH = 250
 
 class FakeContext:
-    aws_request_id = TEST_LAMBDA_REQUEST_ID 
+    aws_request_id = TEST_LAMBDA_REQUEST_ID
 
 def test_success_response_does_not_mutate_input_body():
     body = {

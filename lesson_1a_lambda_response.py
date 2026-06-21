@@ -1,5 +1,10 @@
 
 
+# Early lesson 1a scaffold — incomplete draft. The test functions called below
+# were never defined; this file is preserved as a lesson history artifact only.
+# It is not part of the production handler suite and is not referenced by tests.
+
+
 if __name__ == "__main__":
     test_valid_event()
     test_missing_trade_id()

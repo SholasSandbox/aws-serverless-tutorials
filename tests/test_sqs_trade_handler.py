@@ -1,7 +1,8 @@
 import json
-import pytest
 import logging
+import pytest
 
+import sqs_trade_handler as sqs_module
 from sqs_trade_handler import (
     sqs_trade_handler,
     ERROR_JSON_BODY_NOT_OBJECT,
@@ -9,16 +10,12 @@ from sqs_trade_handler import (
     ERROR_MISSING_REQUIRED_FIELD,
 )
 
-import sqs_trade_handler as sqs_module
-
 from trade_handler import (
     find_missing_required_field,
     validate_volume_mwh,
     REQUIRED_FIELDS,
     ERROR_VOLUME_MWH_NOT_NUMBER,
     ERROR_VOLUME_MWH_NOT_POSITIVE,
-
-
 )
 
 TEST_SQS_MESSAGE_ID = "sqs-message-id-456"

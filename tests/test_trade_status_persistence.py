@@ -68,7 +68,7 @@ def test_build_trade_status_record_for_rejected_trade():
         "schema_version": "1.0",
     }
 
-#Revisit this test, after 2 other lesson 26 tests completed
+# Revisit this test, after 2 other lesson 26 tests completed
 def test_persist_trade_status_record_calls_dynamodb_put_item():
     dynamodb_table = Mock()
 

@@ -120,5 +120,3 @@ def build_s3_key(
         f"year={year}/month={month}/day={day}/"
         f"trade_id={safe_trade_id}.json"
     )
-
-

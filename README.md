@@ -59,6 +59,6 @@ user approves it for that task.
 
 ## Current Status
 
-The workspace is not currently a Git repository. Version-control setup is a
-separate decision; documentation and tests should be made coherent before the
-first intentional baseline commit.
+The workspace is under version control. The Git repository was initialised
+after the test suite reached a stable baseline. `.gitignore` covers `.venv`,
+caches, bytecode, `.DS_Store`, and `archive/`.

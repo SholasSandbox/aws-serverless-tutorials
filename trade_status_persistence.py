@@ -43,7 +43,7 @@ def persist_trade_status_record(
     try:
         dynamodb_table.put_item(
             Item=status_record,
-            ConditionExpression="attribute_not_exists(trade_id)",        
+            ConditionExpression="attribute_not_exists(trade_id)",
         )
 
     except conditional_check_failed_exception:
@@ -52,7 +52,7 @@ def persist_trade_status_record(
             "result_type": status_record["result_type"],
             "status": "already_persisted",
         }
-        
+
     return {
         "trade_id": status_record["trade_id"],
         "processed_at": status_record["processed_at"],
@@ -170,5 +170,3 @@ def build_trade_status_record_from_artifact(
         rejection_summary=rejection_summary,
         schema_version=artifact["schema_version"],
     )
-
-

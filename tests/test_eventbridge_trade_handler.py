@@ -19,6 +19,7 @@ def test_eventbridge_trade_handler_valid_trade_returns_received():
     assert response["request_id"] == "evt-12345"
     assert response["trade"]["trade_id"] == "TRD-1001"
 
+
 def test_eventbridge_trade_handler_invalid_volume_mwh_returns_rejected():
     event = {
         "id": "evt-12345",
