@@ -30,10 +30,10 @@ explained without relying on the tutorial prompt.
 | SQS record handling and partial batch responses | Implemented | `sqs_trade_handler.py`, corresponding tests |
 | Step Functions task validation | Implemented | handler, ASL examples, and tests |
 | Accepted/rejected S3 result artifacts | Implemented | `trade_result_persistence.py`, corresponding tests |
-| DynamoDB status records | Implemented | `trade_status_persistence.py`, corresponding tests |
-| Combined S3 and DynamoDB persistence | Implemented | workflow/handler modules and tests |
+| DynamoDB status records | Implemented | Conditional `attribute_not_exists(trade_id)` writes and duplicate-as-idempotent-success tests in `trade_status_persistence.py` |
+| Combined S3 and DynamoDB persistence | Implemented | Deterministic S3 keys and repeatable compact workflow responses in workflow/handler modules and tests |
 | Repository documentation and governance | Implemented | `README.md`, `AGENTS.md`, this plan |
-| Test baseline | Verified | 163 tests passed on 2026-06-16 with `.venv/bin/python -m pytest -q` |
+| Test baseline | Verified | 168 tests passed on 2026-06-21 with `.venv/bin/python -m pytest -q` |
 | Intentional Git baseline | Implemented | Repository initialised; `.gitignore` covers `.venv`, caches, bytecode, `.DS_Store`, and `archive/` |
 
 ## Active Sequence
@@ -63,6 +63,8 @@ explained without relying on the tutorial prompt.
 
 - [ ] Demonstrate Lambda retry and idempotency implications for each event
   source.
+  Persistence-workflow retry/idempotency evidence is complete in Lesson 26;
+  event-source-specific retry implications remain open.
 - [ ] Add an explicit SQS poison-message and DLQ design exercise.
 - [ ] Test mixed-success SQS batches and partial batch failure semantics.
 - [x] Add Step Functions timeout, retry, catch, and terminal-failure examples.
@@ -71,7 +73,9 @@ explained without relying on the tutorial prompt.
 
 ### 4. Deepen persistence and IAM reasoning
 
-- [ ] Add conditional or idempotent DynamoDB write examples.
+- [x] Add conditional or idempotent DynamoDB write examples. Lesson 26 uses
+  `ConditionExpression="attribute_not_exists(trade_id)"` and treats the
+  expected duplicate failure as idempotent success.
 - [ ] Document S3 key design, partitioning, overwrite behavior, and encryption
   assumptions.
 - [ ] Create least-privilege IAM action/resource checklists for each handler.
@@ -85,6 +89,34 @@ explained without relying on the tutorial prompt.
 - [ ] Deploy only after explicit user approval.
 - [ ] Capture sanitized evidence and tear down resources after the lesson.
 - [ ] Do not connect the lab to the Energy Data Lakehouse automatically.
+
+## Completed Lesson Evidence
+
+### Lesson 26: Idempotency and duplicate persistence protection
+
+Status: **Completed locally on 2026-06-21**.
+
+Evidence:
+
+- conditional DynamoDB write protection using
+  `ConditionExpression="attribute_not_exists(trade_id)"`;
+- duplicate conditional-check failure returns idempotent success;
+- unexpected DynamoDB errors remain visible;
+- deterministic S3 keys are verified through `build_s3_key`;
+- repeated successful workflow execution returns the same compact persistence
+  response;
+- full local suite passed: 168 tests.
+
+Caveat:
+
+- duplicate handling is tested at `persist_trade_status_record` through an
+  injected fake conditional-check exception;
+- the full workflow does not yet inject a real DynamoDB conditional-check
+  exception type;
+- no AWS resources were deployed.
+
+SAP-C02 mapping: Domain 2 resilience and Domain 3 continuous improvement.
+This is tutorial evidence only, not Energy Data Lakehouse implementation.
 
 ## Parked Topics
 
