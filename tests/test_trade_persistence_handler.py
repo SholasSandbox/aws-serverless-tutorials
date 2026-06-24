@@ -4,6 +4,149 @@ from unittest.mock import Mock
 import trade_persistence_handler as handler_module
 
 
+@pytest.mark.parametrize(
+    "event",
+    [
+        None,
+        123,
+        "bad event",
+        ["bad"],
+    ],
+)
+def test_extract_persistence_event_parts_rejects_non_dict_event(event):
+    with pytest.raises(ValueError, match="event must be a dict"):
+        handler_module.extract_persistence_event_parts(event)
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {
+        "trade": None,
+        "validation": {
+            "is_valid": True,
+            "errors": [],
+        },
+        "processed_at": "2026-06-02T18:30:00Z",
+        },
+        {
+        "trade": 123,
+        "validation": {
+            "is_valid": True,
+            "errors": [],
+        },
+        "processed_at": "2026-06-02T18:30:00Z",
+        },
+        {
+        "trade": "not a dict",
+        "validation": {
+            "is_valid": True,
+            "errors": [],
+        },
+        "processed_at": "2026-06-02T18:30:00Z",
+        },
+                {
+        "trade": ["bad"],
+        "validation": {
+            "is_valid": True,
+            "errors": [],
+        },
+        "processed_at": "2026-06-02T18:30:00Z",
+        },
+    ],
+)
+def test_extract_persistence_event_parts_rejects_trade_that_is_not_dict(event):
+    with pytest.raises(ValueError, match="event field 'trade' must be a dict"):
+        handler_module.extract_persistence_event_parts(event)
+
+
+@pytest.mark.parametrize(
+    "event",
+    [
+        {
+        "trade": {
+            "trade_id": "TRD-001",
+            "product": "POWER",
+            "volume_mwh": 100,
+        },
+        "validation": None
+        ,
+        "processed_at": "2026-06-02T18:30:00Z",
+        },
+        {
+        "trade": {
+            "trade_id": "TRD-001",
+            "product": "POWER",
+            "volume_mwh": 100,
+        },
+        "validation": 123,
+        "processed_at": "2026-06-02T18:30:00Z",
+        },
+        {
+        "trade": {
+            "trade_id": "TRD-001",
+            "product": "POWER",
+            "volume_mwh": 100,
+        },
+        "validation": "bad validation field"
+        ,
+        "processed_at": "2026-06-02T18:30:00Z",
+        },
+                {
+        "trade": {
+            "trade_id": "TRD-001",
+            "product": "POWER",
+            "volume_mwh": 100,
+        },
+        "validation": ["bad validation field"],
+        "processed_at": "2026-06-02T18:30:00Z",
+        },
+    ],
+)
+def test_extract_persistence_event_parts_rejects_validation_that_is_not_dict(event):
+    with pytest.raises(ValueError, match="event field 'validation' must be a dict"):
+        handler_module.extract_persistence_event_parts(event)
+
+
+def test_extract_persistence_event_parts_rejects_missing_trade_id():
+    event = {
+        "trade": {
+            "product": "POWER",
+            "volume_mwh": 100,
+        },
+        "validation": {
+            "is_valid": True,
+            "errors": [],
+        },
+        "processed_at": "2026-06-02T18:30:00Z",
+    }
+
+    with pytest.raises(ValueError, match="Missing trade field: trade_id"):
+        handler_module.extract_persistence_event_parts(event)
+
+def test_extract_persistence_event_parts_returns_expected_parts():
+    event = {
+        "trade": {
+            "trade_id": "TRD-001",
+            "product": "POWER",
+            "volume_mwh": 100,
+        },
+        "validation": {
+            "is_valid": True,
+            "errors": [],
+        },
+        "processed_at": "2026-06-02T18:30:00Z",
+    }
+
+    result = handler_module.extract_persistence_event_parts(event)
+
+    assert result == {
+        "trade": event["trade"],
+        "validation": event["validation"],
+        "processed_at": event["processed_at"],
+    }
+
+
 def test_trade_persistence_handler_persists_accepted_trade_result():
     s3_client = Mock()
     dynamodb_table = Mock()
@@ -251,3 +394,38 @@ def test_build_persistence_dependencies_requires_status_table_env(monkeypatch):
         match="Missing environment variable: TRADE_STATUS_TABLE_NAME",
     ):
         handler_module.build_persistence_dependencies()
+
+
+def test_trade_persistence_handler_logs_and_reraises_unexpected_s3_put_failure(caplog):
+    s3_client = Mock()
+    dynamodb_table = Mock()
+
+    s3_client.put_object.side_effect = RuntimeError("S3 put failed")
+
+    event = {
+        "trade": {
+            "trade_id": "TRD-001",
+            "product": "POWER",
+            "volume_mwh": 100,
+        },
+        "validation": {
+            "is_valid": True,
+            "errors": [],
+        },
+        "processed_at": "2026-06-02T18:30:00Z",
+    }
+
+    with caplog.at_level("ERROR", logger=handler_module.logger.name):
+        with pytest.raises(RuntimeError, match="S3 put failed"):
+            handler_module.trade_persistence_handler(
+                event,
+                None,
+                s3_client=s3_client,
+                dynamodb_table=dynamodb_table,
+                bucket_name="test-results-bucket",
+            )
+
+    assert "Unexpected persistence handler error trade_id=TRD-001" in caplog.text
+
+    s3_client.put_object.assert_called_once()
+    dynamodb_table.put_item.assert_not_called()
