@@ -36,9 +36,7 @@ def test_persistence_task_output_contract_contains_stable_status_and_s3_pointer(
         "result_type": "accepted",
         "s3_bucket": "test-results-bucket",
         "s3_key": (
-            "trade-results/accepted/"
-            "year=2026/month=06/day=02/"
-            "trade_id=TRD-001.json"
+            "trade-results/accepted/year=2026/month=06/day=02/trade_id=TRD-001.json"
         ),
     }
 

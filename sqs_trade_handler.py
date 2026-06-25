@@ -71,7 +71,9 @@ def sqs_trade_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
         missing_field = find_missing_required_field(trade, REQUIRED_FIELDS)
         if missing_field is not None:
-            record_rejection(message_id, f"{ERROR_MISSING_REQUIRED_FIELD}: {missing_field}", body)
+            record_rejection(
+                message_id, f"{ERROR_MISSING_REQUIRED_FIELD}: {missing_field}", body
+            )
             continue
 
         volume_mwh_error = validate_volume_mwh(trade["volume_mwh"])

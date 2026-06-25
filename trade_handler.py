@@ -36,7 +36,9 @@ def parse_json_body(event: dict[str, Any]) -> dict[str, Any] | None:
     return parsed_body
 
 
-def find_missing_required_field(body: dict[str, Any], required_fields: list[str]) -> str | None:
+def find_missing_required_field(
+    body: dict[str, Any], required_fields: list[str]
+) -> str | None:
     for field in required_fields:
         if field not in body:
             return field
@@ -76,7 +78,9 @@ def error_response(message: str, request_id: str | None = None) -> dict[str, Any
     }
 
 
-def success_response(body: dict[str, Any], request_id: str | None = None) -> dict[str, Any]:
+def success_response(
+    body: dict[str, Any], request_id: str | None = None
+) -> dict[str, Any]:
     response_body = body.copy()
     if request_id is not None:
         response_body["request_id"] = request_id
@@ -119,14 +123,20 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         missing_field = find_missing_required_field(request_body, REQUIRED_FIELDS)
 
         if missing_field is not None:
-            logger.warning("Missing required field: %s request_id=%s", missing_field, request_id)
-            return error_response(f"Missing required field: {missing_field}", request_id)
+            logger.warning(
+                "Missing required field: %s request_id=%s", missing_field, request_id
+            )
+            return error_response(
+                f"Missing required field: {missing_field}", request_id
+            )
 
         volume_mwh = request_body["volume_mwh"]
 
         volume_mwh_error = validate_volume_mwh(volume_mwh)
         if volume_mwh_error is not None:
-            logger.warning("Invalid volume_mwh: %s request_id=%s", volume_mwh_error, request_id)
+            logger.warning(
+                "Invalid volume_mwh: %s request_id=%s", volume_mwh_error, request_id
+            )
             return error_response(volume_mwh_error, request_id)
 
         response_body = {

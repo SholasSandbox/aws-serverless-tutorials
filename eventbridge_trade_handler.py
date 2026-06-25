@@ -21,45 +21,37 @@ def eventbridge_trade_handler(event: dict[str, Any], context: Any) -> dict[str, 
     if not isinstance(trade, dict):
         logger.warning(
             "Invalid EventBridge event: missing or invalid detail",
-            extra={"request_id": event_id}
+            extra={"request_id": event_id},
         )
         return {
             "status": "rejected",
             "request_id": event_id,
-            "error": "Missing or invalid event detail"
+            "error": "Missing or invalid event detail",
         }
 
     missing_field = find_missing_required_field(trade, REQUIRED_FIELDS)
     if missing_field is not None:
         logger.warning(
             "Invalid trade event: missing required field",
-            extra={"request_id": event_id, "missing_field": missing_field}
+            extra={"request_id": event_id, "missing_field": missing_field},
         )
         return {
             "status": "rejected",
             "request_id": event_id,
-            "error": f"Missing required field: {missing_field}"
+            "error": f"Missing required field: {missing_field}",
         }
 
     volume_error = validate_volume_mwh(trade["volume_mwh"])
     if volume_error is not None:
         logger.warning(
             "Invalid trade event: volume_mwh validation failed",
-            extra={"request_id": event_id}
+            extra={"request_id": event_id},
         )
-        return {
-            "status": "rejected",
-            "request_id": event_id,
-            "error": volume_error
-        }
+        return {"status": "rejected", "request_id": event_id, "error": volume_error}
 
     logger.info(
         "Trade event processed",
-        extra={"request_id": event_id, "trade_id": trade.get("trade_id")}
+        extra={"request_id": event_id, "trade_id": trade.get("trade_id")},
     )
 
-    return {
-        "status": STATUS_RECEIVED,
-        "request_id": event_id,
-        "trade": trade.copy()
-    }
+    return {"status": STATUS_RECEIVED, "request_id": event_id, "trade": trade.copy()}

@@ -68,6 +68,7 @@ def test_build_trade_status_record_for_rejected_trade():
         "schema_version": "1.0",
     }
 
+
 # Revisit this test, after 2 other lesson 26 tests completed
 def test_persist_trade_status_record_calls_dynamodb_put_item():
     dynamodb_table = Mock()
@@ -90,7 +91,7 @@ def test_persist_trade_status_record_calls_dynamodb_put_item():
 
     dynamodb_table.put_item.assert_called_once_with(
         Item=status_record,
-        ConditionExpression="attribute_not_exists(trade_id)",      
+        ConditionExpression="attribute_not_exists(trade_id)",
     )
 
 
@@ -123,7 +124,6 @@ def test_persist_trade_status_record_returns_stable_response():
         "processed_at": "2026-06-02T18:30:00Z",
         "status": "ACCEPTED",
     }
-
 
 
 def test_build_trade_status_record_from_accepted_artifact_and_s3_pointer():
@@ -212,7 +212,7 @@ def test_build_trade_status_record_from_artifact_rejects_missing_schema_version(
         "artifact_type": ARTIFACT_TYPE_ACCEPTED,
         "status": STATUS_ACCEPTED,
         "trade_id": "TRD-001",
-        "processed_at": "2026-06-02T18:30:00Z",      
+        "processed_at": "2026-06-02T18:30:00Z",
         "trade": {
             "trade_id": "TRD-001",
             "product": "POWER",
@@ -254,8 +254,7 @@ def test_build_trade_status_record_from_artifact_rejects_missing_schema_version(
     ],
 )
 def test_build_trade_status_record_from_artifact_rejects_missing_s3_pointer_field(
-    s3_pointer,
-    expected_missing_s3_field
+    s3_pointer, expected_missing_s3_field
 ):
     artifact = {
         "artifact_type": ARTIFACT_TYPE_ACCEPTED,
@@ -334,6 +333,7 @@ def test_build_trade_status_record_from_artifact_rejects_rejected_artifact_with_
             s3_pointer=s3_pointer,
         )
 
+
 def test_build_trade_status_record_from_artifact_rejects_accepted_artifact_with_invalid_validation():
     artifact = {
         "artifact_type": ARTIFACT_TYPE_ACCEPTED,
@@ -401,7 +401,6 @@ def test_persist_trade_status_uses_conditional_put_for_new_trade_status():
         "s3_bucket": "trade-results-bucket",
         "s3_key": "results/accepted/trade_id=TRD-001/result.json",
         "processed_at": "2026-06-16T20:00:00Z",
-
     }
 
     persist_trade_status_record(dynamodb_table=table, status_record=status_record)
@@ -433,7 +432,7 @@ def test_persist_trade_status_treats_duplicate_trade_status_as_idempotent_succes
     result = persist_trade_status_record(
         dynamodb_table=table,
         status_record=status_record,
-        conditional_check_failed_exception=FakeConditionalCheckFailedException,        
+        conditional_check_failed_exception=FakeConditionalCheckFailedException,
     )
 
     assert result == {
@@ -444,7 +443,7 @@ def test_persist_trade_status_treats_duplicate_trade_status_as_idempotent_succes
 
     table.put_item.assert_called_once_with(
         Item=status_record,
-        ConditionExpression="attribute_not_exists(trade_id)",      
+        ConditionExpression="attribute_not_exists(trade_id)",
     )
 
 
@@ -466,7 +465,6 @@ def test_save_trade_status_does_not_swallow_unexpected_dynamodb_errors():
         persist_trade_status_record(
             dynamodb_table=table,
             status_record=status_record,
-
         )
 
     table.put_item.assert_called_once_with(

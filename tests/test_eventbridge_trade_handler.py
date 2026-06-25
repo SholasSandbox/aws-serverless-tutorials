@@ -1,4 +1,3 @@
-
 from eventbridge_trade_handler import eventbridge_trade_handler
 from trade_handler import STATUS_RECEIVED
 

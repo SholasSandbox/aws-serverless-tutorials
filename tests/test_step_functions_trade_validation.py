@@ -140,10 +140,7 @@ def test_is_trade_valid_checks_validation_is_valid():
 
     choice_state = state_machine["States"]["IsTradeValid"]
 
-    variables_checked = [
-        choice["Variable"]
-        for choice in choice_state["Choices"]
-    ]
+    variables_checked = [choice["Variable"] for choice in choice_state["Choices"]]
 
     assert "$.validation.is_valid" in variables_checked
 

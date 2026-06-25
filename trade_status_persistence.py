@@ -38,7 +38,8 @@ def persist_trade_status_record(
     *,
     dynamodb_table: Any,
     status_record: dict[str, Any],
-    conditional_check_failed_exception: type[Exception] | tuple[type[Exception], ...] = ()
+    conditional_check_failed_exception: type[Exception]
+    | tuple[type[Exception], ...] = (),
 ) -> dict[str, Any]:
     try:
         dynamodb_table.put_item(

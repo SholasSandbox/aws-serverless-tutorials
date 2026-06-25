@@ -105,9 +105,7 @@ def build_s3_key(
     if result_type not in VALID_RESULT_TYPES:
         raise ValueError(f"Unsupported result_type: {result_type}")
 
-    parsed_timestamp = datetime.fromisoformat(
-        processed_at.replace("Z", "+00:00")
-    )
+    parsed_timestamp = datetime.fromisoformat(processed_at.replace("Z", "+00:00"))
 
     year = parsed_timestamp.strftime("%Y")
     month = parsed_timestamp.strftime("%m")

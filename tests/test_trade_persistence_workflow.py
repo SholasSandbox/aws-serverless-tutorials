@@ -35,9 +35,7 @@ def test_persist_trade_processing_result_persists_accepted_trade_artifact_and_st
     )
 
     expected_s3_key = (
-        "trade-results/accepted/"
-        "year=2026/month=06/day=02/"
-        "trade_id=TRD-001.json"
+        "trade-results/accepted/year=2026/month=06/day=02/trade_id=TRD-001.json"
     )
 
     s3_client.put_object.assert_called_once()
@@ -109,9 +107,7 @@ def test_persist_trade_processing_result_persists_rejected_trade_artifact_and_st
     )
 
     expected_s3_key = (
-        "trade-results/rejected/"
-        "year=2026/month=06/day=02/"
-        "trade_id=TRD-001.json"
+        "trade-results/rejected/year=2026/month=06/day=02/trade_id=TRD-001.json"
     )
 
     s3_client.put_object.assert_called_once()
@@ -262,7 +258,6 @@ def test_persistence_workflow_can_be_retried_without_changing_success_contract()
     assert first_result["result_type"] == "accepted"
     assert first_result["s3_bucket"] == "trade-results-bucket"
     assert first_result["s3_key"] == (
-        "trade-results/accepted/year=2026/month=06/day=16/"
-        "trade_id=TRD-001.json"
+        "trade-results/accepted/year=2026/month=06/day=16/trade_id=TRD-001.json"
     )
     assert second_result["s3_key"] == first_result["s3_key"]

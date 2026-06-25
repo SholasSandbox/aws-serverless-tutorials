@@ -15,7 +15,6 @@ from trade_handler import (
 from trade_result_persistence import (
     STATUS_ACCEPTED,
     STATUS_REJECTED,
-    utc_now_iso,
     build_trade_result_document,
 )
 
@@ -141,7 +140,9 @@ def test_step_functions_validate_trade_handler_returns_invalid_for_invalid_volum
         123,
     ],
 )
-def test_step_functions_validate_trade_handler_returns_invalid_for_non_dict_input(event):
+def test_step_functions_validate_trade_handler_returns_invalid_for_non_dict_input(
+    event,
+):
     response = step_functions_validate_trade_handler(event, None)
 
     assert response == {

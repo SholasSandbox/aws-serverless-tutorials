@@ -73,9 +73,7 @@ def test_build_s3_key_for_accepted_trade():
     )
 
     assert key == (
-        "trade-results/accepted/"
-        "year=2026/month=06/day=02/"
-        "trade_id=TRD-001.json"
+        "trade-results/accepted/year=2026/month=06/day=02/trade_id=TRD-001.json"
     )
 
 
@@ -87,9 +85,7 @@ def test_build_s3_key_for_rejected_trade():
     )
 
     assert key == (
-        "trade-results/rejected/"
-        "year=2026/month=06/day=02/"
-        "trade_id=TRD-002.json"
+        "trade-results/rejected/year=2026/month=06/day=02/trade_id=TRD-002.json"
     )
 
 
@@ -111,9 +107,7 @@ def test_build_s3_key_allows_custom_base_prefix():
     )
 
     assert key == (
-        "custom-prefix/accepted/"
-        "year=2026/month=06/day=02/"
-        "trade_id=TRD-004.json"
+        "custom-prefix/accepted/year=2026/month=06/day=02/trade_id=TRD-004.json"
     )
 
 
@@ -149,9 +143,7 @@ def test_build_s3_key_sanitises_trade_id():
     )
 
     assert key == (
-        "trade-results/accepted/"
-        "year=2026/month=06/day=02/"
-        "trade_id=TRD-001-bad.json"
+        "trade-results/accepted/year=2026/month=06/day=02/trade_id=TRD-001-bad.json"
     )
 
 
@@ -174,7 +166,5 @@ def test_s3_result_key_is_deterministic_for_same_trade_result():
 
     assert second_key == first_key
     assert first_key == (
-        "trade-results/accepted/year=2026/month=06/day=16/"
-        "trade_id=TRD-001.json"
+        "trade-results/accepted/year=2026/month=06/day=16/trade_id=TRD-001.json"
     )
-    
