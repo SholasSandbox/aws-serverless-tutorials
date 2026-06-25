@@ -2,7 +2,6 @@ import os
 import logging
 
 from typing import Any
-from botocore.exceptions import ClientError
 
 import boto3
 
@@ -40,7 +39,7 @@ def require_non_empty_string(value: Any, field_name: str) -> str:
     return value
 
 
-def require_positive_number(value: Any, field_name: str) -> int | float:
+def require_number(value: Any, field_name: str) -> int | float:
     if not isinstance(value, int | float) or isinstance(value, bool):
         raise ValueError(f"{field_name} must be a number")
 
@@ -54,7 +53,7 @@ def extract_persistence_event_parts(event: Any) -> dict[str, Any]:
     required_event_fields = ["trade", "validation", "processed_at"]
 
     missing_event_field = find_missing_required_field(event, required_event_fields)
-    
+
     if missing_event_field is not None:
         raise ValueError(f"Missing event field: {missing_event_field}")
 
@@ -78,17 +77,17 @@ def extract_persistence_event_parts(event: Any) -> dict[str, Any]:
 
     require_non_empty_string(
         trade["trade_id"],
-        "event trade_id",
+        "trade trade_id",
     )
 
     require_non_empty_string(
         trade["product"],
-        "event product",
+        "trade product",
     )
 
-    require_positive_number(
+    require_number(
         trade["volume_mwh"],
-        "event volume_mwh",
+        "trade volume_mwh",
     )
 
     required_validation_fields = ["is_valid", "errors"]
@@ -97,13 +96,13 @@ def extract_persistence_event_parts(event: Any) -> dict[str, Any]:
         required_validation_fields,
     )
     if missing_validation_field is not None:
-        raise ValueError(f"Missing validation field: {missing_validation_field}")    
-    
-    is_valid = validation.get("is_valid")
+        raise ValueError(f"Missing validation field: {missing_validation_field}")
+
+    is_valid = validation["is_valid"]
     if not isinstance(is_valid, bool):
         raise ValueError("validation is_valid must be a boolean")
-    
-    errors = validation.get("errors")
+
+    errors = validation["errors"]
     if not isinstance(errors, list):
         raise ValueError("validation errors must be a list")
 
@@ -136,7 +135,7 @@ def trade_persistence_handler(
     except Exception:
         logger.exception(
             "Unexpected persistence handler error trade_id=%s",
-            validated_event["trade"].get("trade_id"),
+            validated_event["trade"]["trade_id"],
         )
         raise
 
