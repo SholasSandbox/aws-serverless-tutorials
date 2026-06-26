@@ -261,3 +261,108 @@ def test_persistence_workflow_can_be_retried_without_changing_success_contract()
         "trade-results/accepted/year=2026/month=06/day=16/trade_id=TRD-001.json"
     )
     assert second_result["s3_key"] == first_result["s3_key"]
+
+
+def test_persistence_workflow_s3_success_dynamodb_failure_leaves_s3_artifact_written():
+    s3_client = Mock()
+    dynamodb_table = Mock()
+
+    dynamodb_table.put_item.side_effect = RuntimeError("DynamoDB put failed")
+
+    trade = {
+        "trade_id": "TRD-001",
+        "product": "POWER",
+        "volume_mwh": 100,
+    }
+
+    validation = {
+        "is_valid": True,
+        "errors": [],
+    }
+
+    processed_at = "2026-06-02T18:30:00Z"
+
+    with pytest.raises(RuntimeError, match="DynamoDB put failed"):
+        persist_trade_processing_result(
+            trade=trade,
+            validation=validation,
+            processed_at=processed_at,
+            s3_client=s3_client,
+            dynamodb_table=dynamodb_table,
+            bucket_name="test-results-bucket",
+        )
+
+    s3_client.put_object.assert_called_once()
+    dynamodb_table.put_item.assert_called_once()
+
+    s3_put_kwargs = s3_client.put_object.call_args.kwargs
+
+    assert s3_put_kwargs["Bucket"] == "test-results-bucket"
+    assert s3_put_kwargs["Key"] == (
+        "trade-results/accepted/year=2026/month=06/day=02/trade_id=TRD-001.json"
+    )
+
+
+def test_persistence_workflow_retry_after_dynamodb_failure_reuses_same_s3_key():
+    s3_client = Mock()
+    dynamodb_table = Mock()
+
+    dynamodb_table.put_item.side_effect = [
+        RuntimeError("DynamoDB put failed"),
+        None,
+    ]
+
+    trade = {
+        "trade_id": "TRD-001",
+        "product": "POWER",
+        "volume_mwh": 100,
+    }
+
+    validation = {
+        "is_valid": True,
+        "errors": [],
+    }
+
+    processed_at = "2026-06-02T18:30:00Z"
+
+    expected_s3_key = (
+        "trade-results/accepted/year=2026/month=06/day=02/trade_id=TRD-001.json"
+    )
+
+    # First call: S3 succeeds, DynamoDB fails.
+    with pytest.raises(RuntimeError, match="DynamoDB put failed"):
+        persist_trade_processing_result(
+            trade=trade,
+            validation=validation,
+            processed_at=processed_at,
+            s3_client=s3_client,
+            dynamodb_table=dynamodb_table,
+            bucket_name="test-results-bucket",
+        )
+
+    # Second call: retry succeeds.
+    result = persist_trade_processing_result(
+        trade=trade,
+        validation=validation,
+        processed_at=processed_at,
+        s3_client=s3_client,
+        dynamodb_table=dynamodb_table,
+        bucket_name="test-results-bucket",
+    )
+
+    assert result["s3_key"] == expected_s3_key
+
+    assert s3_client.put_object.call_count == 2
+    assert dynamodb_table.put_item.call_count == 2
+
+    first_s3_key = s3_client.put_object.call_args_list[0].kwargs["Key"]
+    second_s3_key = s3_client.put_object.call_args_list[1].kwargs["Key"]
+
+    assert first_s3_key == expected_s3_key
+    assert second_s3_key == expected_s3_key
+
+    first_s3_bucket = s3_client.put_object.call_args_list[0].kwargs["Bucket"]
+    second_s3_bucket = s3_client.put_object.call_args_list[1].kwargs["Bucket"]
+
+    assert first_s3_bucket == "test-results-bucket"
+    assert second_s3_bucket == "test-results-bucket"
