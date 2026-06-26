@@ -33,9 +33,11 @@ explained without relying on the tutorial prompt.
 | DynamoDB status records | Implemented | Conditional `attribute_not_exists(trade_id)` writes and duplicate-as-idempotent-success tests in `trade_status_persistence.py` |
 | Combined S3 and DynamoDB persistence | Implemented | Deterministic S3 keys and repeatable compact workflow responses in workflow/handler modules and tests |
 | Repository documentation and governance | Implemented | `README.md`, `AGENTS.md`, this plan |
-| Test baseline | Verified | 168 tests passed on 2026-06-21 with `.venv/bin/python -m pytest -q` |
+| Test baseline | Verified | 204 tests passed on 2026-06-25 with `.venv/bin/python -m pytest -q` |
 | Intentional Git baseline | Implemented | Repository initialised; `.gitignore` covers `.venv`, caches, bytecode, `.DS_Store`, and `archive/` |
 | Consolidation review | Implemented | Import order, formatting, trailing whitespace, dead comments, stale README note, and empty archive file resolved in Lesson 27 |
+| Persistence handler boundary hardening | Implemented | `trade_persistence_handler.py` rewritten to production shape; boundary and edge-case tests added in Lesson 28 |
+| Ruff formatting baseline | Implemented | `ruff` added to `pyproject.toml`; consistent style applied across all 20 tutorial files |
 
 ## Active Sequence
 
@@ -154,6 +156,33 @@ Weak area noted:
 SAP-C02 mapping: Domain 3 operational excellence (code hygiene, reproducible
 setup, structured evidence).
 This is tutorial evidence only, not Energy Data Lakehouse implementation.
+
+### Lesson 28: Persistence handler boundary hardening
+
+Status: **Completed locally on 2026-06-25**.
+
+Evidence:
+
+- `trade_persistence_handler.py` rewritten to production shape: strict input
+  validation, typed internal helpers, structured error responses, and clean
+  separation between the Lambda boundary and the workflow layer;
+- 36 new tests added covering malformed event shapes, missing required fields,
+  unexpected workflow exceptions, and correct pass-through of workflow results;
+- full local suite passed: 204 tests.
+
+SAP-C02 mapping: Domain 3 operational excellence (handler contracts) and
+Domain 2 resilience (boundary isolation).
+This is tutorial evidence only, not Energy Data Lakehouse implementation.
+
+### Ruff formatting baseline
+
+Status: **Completed locally on 2026-06-25**.
+
+Evidence:
+
+- `ruff` added to `pyproject.toml` dev dependencies;
+- consistent style applied across all 20 tutorial source and test files;
+- full local suite passed: 204 tests; no behaviour changes.
 
 ## Parked Topics
 
