@@ -39,6 +39,11 @@ Before implementing a change:
 - Add or update tests for each behavior change.
 - Correct inaccurate assumptions directly, especially around retries,
   idempotency, partial batch failures, IAM permissions, and persistence.
+- When the user suggests an action that conflicts with good practice, explain
+  the concern and recommend the better approach before proceeding. Because the
+  workspace is used for learning, do not implement a poor practice silently.
+  Proceed with the user's requested deviation only after they explicitly state
+  that they want to make that exception for the current task.
 
 ## AWS safety
 
