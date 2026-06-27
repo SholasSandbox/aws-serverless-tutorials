@@ -1,3 +1,5 @@
+Related note: `docs/iam/persistence-handler-iam-checklist.md`
+
 # Lesson 31: Retry-Safe Persistence and Reconciliation Decision Note
 
 ## Purpose
