@@ -162,6 +162,23 @@ def test_validate_trade_retry_max_attempts_is_three():
     assert retry_config["MaxAttempts"] == 3
 
 
+def test_validate_trade_retry_covers_transient_lambda_errors():
+    state_machine = load_json(RETRY_CATCH_STATE_MACHINE_PATH)
+
+    retry_config = state_machine["States"]["ValidateTrade"]["Retry"][0]
+    retry_errors = retry_config["ErrorEquals"]
+
+    expected = [
+        "Lambda.ServiceException",
+        "Lambda.AWSLambdaException",
+        "Lambda.SdkClientException",
+        "Lambda.TooManyRequestsException",
+        "States.Timeout",
+    ]
+    for error in expected:
+        assert error in retry_errors, f"Missing retry error: {error}"
+
+
 def test_validate_trade_state_has_catch():
     state_machine = load_json(RETRY_CATCH_STATE_MACHINE_PATH)
 
@@ -179,13 +196,13 @@ def test_validate_trade_catch_routes_to_validation_task_failed():
     assert catch_config["Next"] == "ValidationTaskFailed"
 
 
-def test_validate_trade_catch_stores_error_under_task_error():
+def test_validate_trade_catch_stores_error_under_validation_error():
     state_machine = load_json(RETRY_CATCH_STATE_MACHINE_PATH)
 
     validate_trade_state = state_machine["States"]["ValidateTrade"]
     catch_config = validate_trade_state["Catch"][0]
 
-    assert catch_config["ResultPath"] == "$.task_error"
+    assert catch_config["ResultPath"] == "$.validation_error"
 
 
 def test_validation_task_failed_state_exists():

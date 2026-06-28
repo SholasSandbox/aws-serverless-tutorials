@@ -15,7 +15,9 @@
                     "ErrorEquals": [
                         "Lambda.ServiceException",
                         "Lambda.AWSLambdaException",
-                        "Lambda.SdkClientException"
+                        "Lambda.SdkClientException",
+                        "Lambda.TooManyRequestsException",
+                        "States.Timeout"
                     ],
                     "IntervalSeconds": 2,
                     "MaxAttempts": 3,
@@ -27,7 +29,7 @@
                     "ErrorEquals": [
                         "States.ALL"
                     ],
-                    "ResultPath": "$.task_error",
+                    "ResultPath": "$.validation_error",
                     "Next": "ValidationTaskFailed"
                 }
             ],
