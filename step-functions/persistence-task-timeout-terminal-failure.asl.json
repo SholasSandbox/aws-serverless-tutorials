@@ -1,0 +1,57 @@
+{
+  "Comment": "Lesson 33 trade persistence workflow with timeout, retry, catch, and terminal failure routing.",
+  "StartAt": "PersistTradeResult",
+  "States": {
+    "PersistTradeResult": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "TimeoutSeconds": 30,
+      "Parameters": {
+        "FunctionName": "arn:aws:lambda:${AWS_REGION}:${AWS_ACCOUNT_ID}:function:${PERSISTENCE_FUNCTION_NAME}:${PERSISTENCE_FUNCTION_ALIAS}",
+        "Payload.$": "$"
+      },
+      "ResultPath": "$.persistence_result",
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.TooManyRequestsException",
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "States.Timeout"
+          ],
+          "IntervalSeconds": 2,
+          "MaxAttempts": 3,
+          "BackoffRate": 2.0
+        }
+      ],
+      "Catch": [
+        {
+          "ErrorEquals": [
+            "States.ALL"
+          ],
+          "ResultPath": "$.persistence_error",
+          "Next": "RouteToManualReconciliation"
+        }
+      ],
+      "Next": "PersistenceSucceeded"
+    },
+    "PersistenceSucceeded": {
+      "Type": "Succeed"
+    },
+    "RouteToManualReconciliation": {
+      "Type": "Pass",
+      "Result": {
+        "reconciliation_required": true,
+        "reason": "Persistence task failed after bounded retry. S3 may have succeeded before DynamoDB failed. Do not hide this as success."
+      },
+      "ResultPath": "$.reconciliation",
+      "Next": "PersistenceFailed"
+    },
+    "PersistenceFailed": {
+      "Type": "Fail",
+      "Error": "PersistenceWorkflowFailed",
+      "Cause": "Persistence task failed after retries and was routed to reconciliation before terminal failure."
+    }
+  }
+}
