@@ -27,7 +27,7 @@ patterns that support SAP-C02 study, including:
 | API-style Lambda validation | `trade_handler.py` | request parsing, validation, logging, stable success/error responses |
 | EventBridge handling | `eventbridge_trade_handler.py` | detail validation and correlation using event IDs |
 | SQS handling | `sqs_trade_handler.py` | record parsing, validation, and partial batch response behavior |
-| Step Functions validation | `step_functions_validate_trade_handler.py`, `step-functions/` | task handler plus basic, task, and retry/catch ASL examples |
+| Step Functions validation | `step_functions_validate_trade_handler.py`, `step-functions/` | task handler plus basic, task, retry/catch, timeout, reconciliation, and terminal-failure ASL examples |
 | S3 result persistence | `trade_result_persistence.py` | accepted/rejected artifacts and partitioned object keys |
 | DynamoDB status persistence | `trade_status_persistence.py` | stable status records and S3 pointers |
 | Combined persistence workflow | `trade_persistence_workflow.py`, `trade_persistence_handler.py` | S3 and DynamoDB orchestration with injected clients |

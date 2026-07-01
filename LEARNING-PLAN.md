@@ -33,11 +33,16 @@ explained without relying on the tutorial prompt.
 | DynamoDB status records | Implemented | Conditional `attribute_not_exists(trade_id)` writes and duplicate-as-idempotent-success tests in `trade_status_persistence.py` |
 | Combined S3 and DynamoDB persistence | Implemented | Deterministic S3 keys and repeatable compact workflow responses in workflow/handler modules and tests |
 | Repository documentation and governance | Implemented | `README.md`, `AGENTS.md`, this plan |
-| Test baseline | Verified | 204 tests passed on 2026-06-25 with `.venv/bin/python -m pytest -q` |
+| Test baseline | Verified | 217 tests passed on 2026-07-01 with `.venv/bin/python -m pytest -q` |
 | Intentional Git baseline | Implemented | Repository initialised; `.gitignore` covers `.venv`, caches, bytecode, `.DS_Store`, and `archive/` |
 | Consolidation review | Implemented | Import order, formatting, trailing whitespace, dead comments, stale README note, and empty archive file resolved in Lesson 27 |
 | Persistence handler boundary hardening | Implemented | `trade_persistence_handler.py` rewritten to production shape; boundary and edge-case tests added in Lesson 28 |
 | Ruff formatting baseline | Implemented | `ruff` added to `pyproject.toml`; consistent style applied across all 20 tutorial files |
+| Persistence failure-ordering reasoning | Implemented | Lesson 29 note plus workflow tests showing S3 can succeed before DynamoDB fails and retry reuses the same S3 key |
+| Persistence IAM boundary | Implemented | Lesson 30 checklist scopes S3, DynamoDB, CloudWatch Logs, and Step Functions role responsibilities for the persistence path |
+| Retry-safe persistence and reconciliation | Implemented | Lesson 31 decision note records retry, catch, reconciliation, and no-default-delete compensation guidance |
+| S3 key design and encryption assumptions | Implemented | Lesson 32 note documents accepted/rejected prefixes, deterministic keys, overwrite behavior, and bucket-level encryption assumptions |
+| Step Functions timeout and terminal failure | Implemented | Lesson 33 ASL definition and tests cover timeout, bounded retry, catch, reconciliation routing, and explicit terminal failure |
 
 ## Active Sequence
 
@@ -78,11 +83,12 @@ explained without relying on the tutorial prompt.
 - [x] Add conditional or idempotent DynamoDB write examples. Lesson 26 uses
   `ConditionExpression="attribute_not_exists(trade_id)"` and treats the
   expected duplicate failure as idempotent success.
-- [ ] Document S3 key design, partitioning, overwrite behavior, and encryption
+- [x] Document S3 key design, partitioning, overwrite behavior, and encryption
   assumptions.
-- [ ] Create least-privilege IAM action/resource checklists for each handler.
-- [ ] Add failure-ordering tests for partial S3/DynamoDB persistence.
-- [ ] Document when orchestration should compensate, retry, or surface manual
+- [x] Create a least-privilege IAM action/resource checklist for the
+  persistence workflow.
+- [x] Add failure-ordering tests for partial S3/DynamoDB persistence.
+- [x] Document when orchestration should compensate, retry, or surface manual
   reconciliation.
 
 ### 5. Optional controlled AWS lab
@@ -183,6 +189,93 @@ Evidence:
 - `ruff` added to `pyproject.toml` dev dependencies;
 - consistent style applied across all 20 tutorial source and test files;
 - full local suite passed: 204 tests; no behaviour changes.
+
+### Lesson 29: Persistence failure ordering
+
+Status: **Completed locally on 2026-06-26**.
+
+Evidence:
+
+- `docs/lessons/lesson-29-persistence-failure-ordering.md` records the
+  S3-then-DynamoDB failure boundary;
+- workflow tests show that S3 can succeed before DynamoDB fails;
+- retry tests show the same deterministic S3 key is reused after the
+  DynamoDB failure path;
+- no AWS resources were deployed.
+
+SAP-C02 mapping: Domain 2 resilience and Domain 3 continuous improvement.
+This is tutorial evidence only, not Energy Data Lakehouse implementation.
+
+### Lesson 30: Least-privilege IAM checklist for persistence
+
+Status: **Completed locally on 2026-06-26**.
+
+Evidence:
+
+- `docs/iam/persistence-handler-iam-checklist.md` scopes the persistence
+  Lambda to S3 `PutObject`, DynamoDB `PutItem`, and CloudWatch Logs writes;
+- the Step Functions role boundary is kept to `lambda:InvokeFunction`;
+- accepted/rejected S3 prefixes drive the recommended S3 resource scope;
+- encryption cautions separate S3 SSE-KMS from DynamoDB table encryption;
+- no AWS resources were deployed.
+
+SAP-C02 mapping: Domain 1 secure architectures and Domain 3 security
+improvement. This is tutorial evidence only, not Energy Data Lakehouse
+implementation.
+
+### Lesson 31: Retry-safe persistence and reconciliation
+
+Status: **Completed locally on 2026-06-27**.
+
+Evidence:
+
+- `docs/lessons/lesson-31-retry-safety-and-reconciliation.md` defines when to
+  retry, catch, fail, or route to reconciliation;
+- the note ties retry safety to deterministic S3 keys and explicit DynamoDB
+  idempotency behavior;
+- the note rejects default S3 delete compensation unless it is deliberately
+  designed and tested;
+- no AWS resources were deployed.
+
+SAP-C02 mapping: Domain 2 resilience and Domain 3 operational excellence.
+This is tutorial evidence only, not Energy Data Lakehouse implementation.
+
+### Lesson 32: S3 key design and encryption assumptions
+
+Status: **Completed locally on 2026-06-27**.
+
+Evidence:
+
+- `docs/lessons/lesson-32-s3-key-design-and-encryption.md` documents the
+  `trade-results/accepted/*` and `trade-results/rejected/*` prefix boundary;
+- deterministic S3 keys are connected to retry safety and IAM scoping;
+- bucket default encryption is the current tutorial assumption;
+- customer-managed KMS is deferred until an explicit deployment design exists;
+- no AWS resources were deployed.
+
+SAP-C02 mapping: Domain 2 storage design, Domain 1 security boundaries, and
+Domain 3 operational improvement. This is tutorial evidence only, not Energy
+Data Lakehouse implementation.
+
+### Lesson 33: Step Functions timeout and terminal failure
+
+Status: **Completed locally on 2026-07-01**.
+
+Evidence:
+
+- `step-functions/persistence-task-timeout-terminal-failure.asl.json` defines
+  a persistence task with `TimeoutSeconds`, bounded `Retry`, `Catch`,
+  reconciliation routing, and an explicit terminal `Fail` state;
+- `tests/test_step_functions_timeout_terminal_failure_definition.py` verifies
+  the ASL contract and confirms Step Functions does not call S3 or DynamoDB
+  directly;
+- `docs/lessons/lesson-33-step-functions-timeout-and-terminal-failure.md`
+  explains the trade-off between automatic cleanup and visible failure;
+- full local suite passed: 217 tests.
+
+SAP-C02 mapping: Domain 2 resilience, Domain 3 continuous improvement, and
+Domain 1 role-boundary reasoning. This is tutorial evidence only, not Energy
+Data Lakehouse implementation.
 
 ## Parked Topics
 

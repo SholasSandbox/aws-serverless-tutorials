@@ -217,3 +217,109 @@ Completed a consistent formatting baseline across the tutorial workspace.
 This is Python/serverless tutorial evidence mapped to SAP-C02 Domain 3
 operational excellence. It is not Energy Data Lakehouse implementation
 evidence.
+
+---
+
+### Lesson 29: Persistence failure ordering
+
+Captured the S3-then-DynamoDB partial-failure boundary for the persistence
+workflow.
+
+**Evidence:**
+
+- Added `docs/lessons/lesson-29-persistence-failure-ordering.md`.
+- Recorded the key failure sequence: S3 write can succeed, then DynamoDB write
+  can fail.
+- Kept the recommended response as deterministic retry plus reconciliation,
+  not broad cleanup permissions.
+- Workflow tests now cover the S3-success/DynamoDB-failure path and confirm
+  retry reuses the same S3 key.
+
+This is Python/serverless tutorial evidence mapped to SAP-C02 Domain 2
+resilience and Domain 3 continuous improvement. It is not Energy Data
+Lakehouse implementation evidence.
+
+---
+
+### Lesson 30: Least-privilege IAM checklist for persistence
+
+Translated the current persistence behavior into a least-privilege IAM
+boundary.
+
+**Evidence:**
+
+- Added `docs/iam/persistence-handler-iam-checklist.md`.
+- Scoped the persistence Lambda to S3 `PutObject`, DynamoDB `PutItem`, and
+  CloudWatch Logs writes.
+- Kept the Step Functions role scoped to `lambda:InvokeFunction`.
+- Explicitly avoided broad permissions such as `s3:*`, `dynamodb:*`,
+  `s3:DeleteObject`, and direct S3/DynamoDB permissions on the Step Functions
+  role.
+- Separated S3 SSE-KMS considerations from DynamoDB table encryption.
+
+This is Python/serverless tutorial evidence mapped to SAP-C02 Domain 1 secure
+architectures and Domain 3 security improvement. It is not Energy Data
+Lakehouse implementation evidence.
+
+---
+
+### Lesson 31: Retry-safe persistence and reconciliation
+
+Turned the failure-ordering lesson into a retry and reconciliation decision
+note.
+
+**Evidence:**
+
+- Added `docs/lessons/lesson-31-retry-safety-and-reconciliation.md`.
+- Defined when to retry, catch, fail, or route to manual reconciliation.
+- Connected retry safety to deterministic S3 keys and explicit DynamoDB
+  idempotency behavior.
+- Rejected default S3 delete compensation unless a later lesson deliberately
+  designs and tests it.
+
+This is Python/serverless tutorial evidence mapped to SAP-C02 Domain 2
+resilience and Domain 3 operational excellence. It is not Energy Data
+Lakehouse implementation evidence.
+
+---
+
+### Lesson 32: S3 key design and encryption assumptions
+
+Documented the S3 object-key boundary used by the current persistence workflow.
+
+**Evidence:**
+
+- Added `docs/lessons/lesson-32-s3-key-design-and-encryption.md`.
+- Kept accepted and rejected artifacts separated under
+  `trade-results/accepted/*` and `trade-results/rejected/*`.
+- Connected deterministic keys to retry safety, reconciliation, and IAM
+  resource scoping.
+- Recorded bucket default encryption as the tutorial assumption and deferred
+  customer-managed KMS design until a deployment boundary exists.
+
+This is Python/serverless tutorial evidence mapped to SAP-C02 Domain 2 storage
+design, Domain 1 security boundaries, and Domain 3 operational improvement. It
+is not Energy Data Lakehouse implementation evidence.
+
+---
+
+### Lesson 33: Step Functions timeout and terminal failure
+
+Completed a local-first Step Functions contract for timeout, retry, catch,
+reconciliation routing, and explicit terminal failure.
+
+**Evidence:**
+
+- Added `step-functions/persistence-task-timeout-terminal-failure.asl.json`.
+- Added `tests/test_step_functions_timeout_terminal_failure_definition.py`.
+- Updated
+  `docs/lessons/lesson-33-step-functions-timeout-and-terminal-failure.md`.
+- Verified the task uses `TimeoutSeconds`, bounded retry, `Catch`, preserved
+  success and failure result paths, and a terminal `Fail` state.
+- Verified Step Functions invokes Lambda only and does not directly call S3 or
+  DynamoDB.
+- Full local suite passed: 217 tests passed.
+
+This is Python/serverless tutorial evidence mapped to SAP-C02 Domain 2
+resilience, Domain 3 continuous improvement, and Domain 1 role-boundary
+reasoning. It is not Energy Data Lakehouse implementation evidence.
