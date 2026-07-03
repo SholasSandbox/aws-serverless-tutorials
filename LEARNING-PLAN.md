@@ -33,7 +33,7 @@ explained without relying on the tutorial prompt.
 | DynamoDB status records | Implemented | Conditional `attribute_not_exists(trade_id)` writes and duplicate-as-idempotent-success tests in `trade_status_persistence.py` |
 | Combined S3 and DynamoDB persistence | Implemented | Deterministic S3 keys and repeatable compact workflow responses in workflow/handler modules and tests |
 | Repository documentation and governance | Implemented | `README.md`, `AGENTS.md`, this plan |
-| Test baseline | Verified | 217 tests passed on 2026-07-01 with `.venv/bin/python -m pytest -q` |
+| Test baseline | Verified | 218 tests passed on 2026-07-03 with `python3 -m pytest -q` |
 | Intentional Git baseline | Implemented | Repository initialised; `.gitignore` covers `.venv`, caches, bytecode, `.DS_Store`, and `archive/` |
 | Consolidation review | Implemented | Import order, formatting, trailing whitespace, dead comments, stale README note, and empty archive file resolved in Lesson 27 |
 | Persistence handler boundary hardening | Implemented | `trade_persistence_handler.py` rewritten to production shape; boundary and edge-case tests added in Lesson 28 |
@@ -43,6 +43,7 @@ explained without relying on the tutorial prompt.
 | Retry-safe persistence and reconciliation | Implemented | Lesson 31 decision note records retry, catch, reconciliation, and no-default-delete compensation guidance |
 | S3 key design and encryption assumptions | Implemented | Lesson 32 note documents accepted/rejected prefixes, deterministic keys, overwrite behavior, and bucket-level encryption assumptions |
 | Step Functions timeout and terminal failure | Implemented | Lesson 33 ASL definition and tests cover timeout, bounded retry, catch, reconciliation routing, and explicit terminal failure |
+| SQS poison-message and DLQ mental model | Implemented | Lesson 34A note explains poison messages, visibility timeout, maxReceiveCount, DLQ ownership, idempotency, and SQS versus Step Functions failure scope |
 
 ## Active Sequence
 
@@ -72,8 +73,8 @@ explained without relying on the tutorial prompt.
   source.
   Persistence-workflow retry/idempotency evidence is complete in Lesson 26;
   event-source-specific retry implications remain open.
-- [ ] Add an explicit SQS poison-message and DLQ design exercise.
-- [ ] Test mixed-success SQS batches and partial batch failure semantics.
+- [x] Add an explicit SQS poison-message and DLQ design exercise.
+- [x] Test mixed-success SQS batches and partial batch failure semantics.
 - [x] Add Step Functions timeout, retry, catch, and terminal-failure examples.
 - [ ] Compare EventBridge, SQS, and direct Step Functions invocation in a
   decision table.
@@ -276,6 +277,27 @@ Evidence:
 SAP-C02 mapping: Domain 2 resilience, Domain 3 continuous improvement, and
 Domain 1 role-boundary reasoning. This is tutorial evidence only, not Energy
 Data Lakehouse implementation.
+
+### Lesson 34A: SQS poison-message and DLQ mental model
+
+Status: **Completed locally on 2026-07-03**.
+
+Evidence:
+
+- `docs/lessons/lesson-34a-sqs-poison-message-and-dlq-mental-model.md`
+  explains poison messages, transient processing failures, validation
+  rejections, partial batch response behaviour, visibility timeout,
+  `maxReceiveCount`, DLQ ownership, and idempotency implications;
+- the note records the important correction that the current handler treats
+  validation and business rejections as non-retryable handled records, while
+  `persist_trade(...)` exceptions are returned in `batchItemFailures`;
+- `tests/test_sqs_trade_handler.py` includes a mixed-batch retryable persistence
+  failure test showing only the failed message ID is returned;
+- full local suite passed: 218 tests.
+
+SAP-C02 mapping: Domain 2 resilience and decoupling, Domain 3 operational
+excellence, and Domain 1 security boundary reasoning. This is tutorial evidence
+only, not Energy Data Lakehouse implementation.
 
 ## Parked Topics
 

@@ -21,6 +21,7 @@ from trade_handler import (
 TEST_SQS_MESSAGE_ID = "sqs-message-id-456"
 MESSAGE_VALID = "msg-valid"
 MESSAGE_INVALID = "msg-invalid"
+MESSAGE_RETRYABLE_FAILURE = "msg-retryable-failure"
 TEST_TRADE_ID = "TRD-1001"
 TEST_PRODUCT = "UK Power"
 TEST_VOLUME_MWH = 250
@@ -361,3 +362,49 @@ def test_sqs_trade_handler_persists_valid_trade(monkeypatch):
     assert_no_batch_failures(response)
     assert len(persisted_trades) == 1
     assert persisted_trades[0]["trade_id"] == TEST_TRADE_ID
+
+
+def test_sqs_trade_handler_handles_mixed_batch_with_retryable_persistence_failure(
+    monkeypatch,
+):
+    retryable_trade_id = "TRD-RETRYABLE-1001"
+    persisted_trade_ids = []
+
+    def fake_persist_trade(trade):
+        persisted_trade_ids.append(trade["trade_id"])
+        if trade["trade_id"] == retryable_trade_id:
+            raise RuntimeError("S3 unavailable")
+
+    monkeypatch.setattr(sqs_module, "persist_trade", fake_persist_trade)
+
+    event = {
+        "Records": [
+            {
+                "messageId": MESSAGE_VALID,
+                "body": json.dumps(
+                    {
+                        "trade_id": TEST_TRADE_ID,
+                        "product": TEST_PRODUCT,
+                        "volume_mwh": TEST_VOLUME_MWH,
+                    }
+                ),
+            },
+            {
+                "messageId": MESSAGE_RETRYABLE_FAILURE,
+                "body": json.dumps(
+                    {
+                        "trade_id": retryable_trade_id,
+                        "product": TEST_PRODUCT,
+                        "volume_mwh": TEST_VOLUME_MWH,
+                    }
+                ),
+            },
+        ]
+    }
+
+    response = sqs_module.sqs_trade_handler(event, None)
+
+    assert response == {
+        "batchItemFailures": [{"itemIdentifier": MESSAGE_RETRYABLE_FAILURE}]
+    }
+    assert persisted_trade_ids == [TEST_TRADE_ID, retryable_trade_id]
