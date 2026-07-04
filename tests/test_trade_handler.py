@@ -1,4 +1,6 @@
 import json
+from typing import Any
+
 import pytest
 
 import trade_handler
@@ -79,7 +81,7 @@ def test_get_request_id_returns_unknown_when_no_request_id_available():
         {"body": json.dumps(None)},  # valid JSON, but not a dict
     ],
 )
-def test_parse_json_body_returns_none_for_invalid_body(event):
+def test_parse_json_body_returns_none_for_invalid_body(event: dict[str, Any]) -> None:
     parsed_body = parse_json_body(event)
 
     assert parsed_body is None
@@ -114,7 +116,9 @@ def test_parse_json_body_returns_dict_for_valid_json_body():
         (0, ERROR_VOLUME_MWH_NOT_POSITIVE),
     ],
 )
-def test_validate_volume_mwh_rejects_invalid_values(volume_mwh, expected_error):
+def test_validate_volume_mwh_rejects_invalid_values(
+    volume_mwh: Any, expected_error: str
+) -> None:
     volume_mwh_error = validate_volume_mwh(volume_mwh)
 
     assert volume_mwh_error == expected_error
@@ -127,7 +131,7 @@ def test_validate_volume_mwh_rejects_invalid_values(volume_mwh, expected_error):
         10.01,
     ],
 )
-def test_validate_volume_mwh_accepts_valid_values(volume_mwh):
+def test_validate_volume_mwh_accepts_valid_values(volume_mwh: int | float) -> None:
     volume_mwh_error = validate_volume_mwh(volume_mwh)
 
     assert volume_mwh_error is None
@@ -160,8 +164,8 @@ def test_validate_volume_mwh_accepts_valid_values(volume_mwh):
     ],
 )
 def test_find_missing_required_field_returns_missing_field(
-    trade, expected_missing_field
-):
+    trade: dict[str, Any], expected_missing_field: str
+) -> None:
     missing_field = find_missing_required_field(trade, REQUIRED_FIELDS)
 
     assert missing_field == expected_missing_field
@@ -187,7 +191,7 @@ def test_find_missing_required_field_returns_none_when_valid():
         {"body": json.dumps(None)},  # valid JSON, but not a dict
     ],
 )
-def test_lambda_handler_returns_400_for_invalid_json_body(event):
+def test_lambda_handler_returns_400_for_invalid_json_body(event: dict[str, Any]) -> None:
     response = lambda_handler(event, None)
 
     response_body = json.loads(response["body"])
@@ -231,8 +235,8 @@ def test_lambda_handler_returns_400_for_invalid_json_body(event):
     ],
 )
 def test_lambda_handler_uses_unknown_request_id_when_request_id_missing_or_invalid(
-    event,
-):
+    event: dict[str, Any],
+) -> None:
     response = lambda_handler(event, None)
 
     body = json.loads(response["body"])
@@ -330,7 +334,9 @@ def test_valid_event():
         ),
     ],
 )
-def test_lambda_handler_returns_400_for_missing_required_fields(trade, expected_error):
+def test_lambda_handler_returns_400_for_missing_required_fields(
+    trade: dict[str, Any], expected_error: str
+) -> None:
     event = {
         "body": json.dumps(trade),
         "requestContext": {"requestId": TEST_API_REQUEST_ID},
@@ -353,7 +359,9 @@ def test_lambda_handler_returns_400_for_missing_required_fields(trade, expected_
         (True, ERROR_VOLUME_MWH_NOT_NUMBER),
     ],
 )
-def test_lambda_handler_returns_400_for_invalid_volume_mwh(volume_mwh, expected_error):
+def test_lambda_handler_returns_400_for_invalid_volume_mwh(
+    volume_mwh: Any, expected_error: str
+) -> None:
     event = {
         "body": json.dumps(
             {
@@ -383,8 +391,10 @@ def test_internal_error_response_returns_500():
     assert response_body["error"] == ERROR_INTERNAL_SERVER
 
 
-def test_lambda_handler_returns_500_when_internal_helper_fails(monkeypatch):
-    def broken_parse_json_body(event):
+def test_lambda_handler_returns_500_when_internal_helper_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken_parse_json_body(event: dict[str, Any]) -> dict[str, Any]:
         raise RuntimeError("simulated parser failure")
 
     monkeypatch.setattr(trade_handler, "parse_json_body", broken_parse_json_body)

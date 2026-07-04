@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 
 from unittest.mock import Mock
@@ -254,8 +256,8 @@ def test_build_trade_status_record_from_artifact_rejects_missing_schema_version(
     ],
 )
 def test_build_trade_status_record_from_artifact_rejects_missing_s3_pointer_field(
-    s3_pointer, expected_missing_s3_field
-):
+    s3_pointer: dict[str, Any], expected_missing_s3_field: str
+) -> None:
     artifact = {
         "artifact_type": ARTIFACT_TYPE_ACCEPTED,
         "schema_version": SCHEMA_VERSION,

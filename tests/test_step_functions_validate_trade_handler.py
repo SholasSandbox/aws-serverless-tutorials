@@ -93,9 +93,9 @@ def test_step_functions_validate_trade_handler_returns_valid_result_for_valid_tr
     ],
 )
 def test_step_functions_validate_trade_handler_returns_invalid_for_missing_required_fields(
-    trade,
-    expected_error,
-):
+    trade: dict[str, Any],
+    expected_error: str,
+) -> None:
     response = step_functions_validate_trade_handler(trade, None)
 
     assert response == {
@@ -114,9 +114,9 @@ def test_step_functions_validate_trade_handler_returns_invalid_for_missing_requi
     ],
 )
 def test_step_functions_validate_trade_handler_returns_invalid_for_invalid_volume_mwh(
-    volume_mwh,
-    expected_error,
-):
+    volume_mwh: Any,
+    expected_error: str,
+) -> None:
     event = {
         "trade_id": TEST_TRADE_ID,
         "product": TEST_PRODUCT,
@@ -141,8 +141,8 @@ def test_step_functions_validate_trade_handler_returns_invalid_for_invalid_volum
     ],
 )
 def test_step_functions_validate_trade_handler_returns_invalid_for_non_dict_input(
-    event,
-):
+    event: Any,
+) -> None:
     response = step_functions_validate_trade_handler(event, None)
 
     assert response == {
@@ -286,7 +286,9 @@ def test_merged_invalid_validation_result_routes_to_rejected_trade():
         {"validation": {"is_valid": "yes", "error": None}},
     ],
 )
-def test_malformed_validation_result_routes_to_invalid_workflow_input(workflow_state):
+def test_malformed_validation_result_routes_to_invalid_workflow_input(
+    workflow_state: dict[str, Any],
+) -> None:
     next_state = route_validation_result(workflow_state)
 
     assert next_state == "InvalidWorkflowInput"
@@ -344,9 +346,9 @@ def build_simulated_lambda_task_error(error_state: dict[str, Any]) -> dict[str, 
     ],
 )
 def test_catch_result_path_adds_task_error_to_workflow_state(
-    lambda_error_state,
-    expected_task_error,
-):
+    lambda_error_state: dict[str, Any],
+    expected_task_error: dict[str, str],
+) -> None:
     original_input = {
         "trade_id": TEST_TRADE_ID,
         "product": TEST_PRODUCT,
@@ -378,9 +380,9 @@ def test_catch_result_path_adds_task_error_to_workflow_state(
     ],
 )
 def test_build_simulated_lambda_task_error_returns_unknown_cause_for_unknown_errors(
-    lambda_error_state,
-    expected_error,
-):
+    lambda_error_state: dict[str, Any],
+    expected_error: str,
+) -> None:
     result = build_simulated_lambda_task_error(lambda_error_state)
 
     assert result == {

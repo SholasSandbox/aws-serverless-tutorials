@@ -1,3 +1,5 @@
+from typing import Any
+
 import pytest
 from unittest.mock import Mock
 
@@ -13,7 +15,7 @@ import trade_persistence_handler as handler_module
         ["bad"],
     ],
 )
-def test_extract_persistence_event_parts_rejects_non_dict_event(event):
+def test_extract_persistence_event_parts_rejects_non_dict_event(event: Any) -> None:
     with pytest.raises(ValueError, match="event must be a dict"):
         handler_module.extract_persistence_event_parts(event)
 
@@ -55,7 +57,9 @@ def test_extract_persistence_event_parts_rejects_non_dict_event(event):
         },
     ],
 )
-def test_extract_persistence_event_parts_rejects_trade_that_is_not_dict(event):
+def test_extract_persistence_event_parts_rejects_trade_that_is_not_dict(
+    event: dict[str, Any],
+) -> None:
     with pytest.raises(ValueError, match="event field 'trade' must be a dict"):
         handler_module.extract_persistence_event_parts(event)
 
@@ -101,7 +105,9 @@ def test_extract_persistence_event_parts_rejects_trade_that_is_not_dict(event):
         },
     ],
 )
-def test_extract_persistence_event_parts_rejects_validation_that_is_not_dict(event):
+def test_extract_persistence_event_parts_rejects_validation_that_is_not_dict(
+    event: dict[str, Any],
+) -> None:
     with pytest.raises(ValueError, match="event field 'validation' must be a dict"):
         handler_module.extract_persistence_event_parts(event)
 
@@ -143,7 +149,9 @@ def test_extract_persistence_event_parts_rejects_validation_that_is_not_dict(eve
         },
     ],
 )
-def test_extract_persistence_event_parts_rejects_non_boolean_validation_is_valid(event):
+def test_extract_persistence_event_parts_rejects_non_boolean_validation_is_valid(
+    event: dict[str, Any],
+) -> None:
     with pytest.raises(ValueError, match="validation is_valid must be a boolean"):
         handler_module.extract_persistence_event_parts(event)
 
@@ -185,7 +193,9 @@ def test_extract_persistence_event_parts_rejects_non_boolean_validation_is_valid
         },
     ],
 )
-def test_extract_persistence_event_parts_rejects_validation_errors_is_not_list(event):
+def test_extract_persistence_event_parts_rejects_validation_errors_is_not_list(
+    event: dict[str, Any],
+) -> None:
     with pytest.raises(ValueError, match="validation errors must be a list"):
         handler_module.extract_persistence_event_parts(event)
 
@@ -227,7 +237,9 @@ def test_extract_persistence_event_parts_rejects_validation_errors_is_not_list(e
         },
     ],
 )
-def test_extract_persistence_event_parts_rejects_non_numeric_trade_volume_mwh(event):
+def test_extract_persistence_event_parts_rejects_non_numeric_trade_volume_mwh(
+    event: dict[str, Any],
+) -> None:
     with pytest.raises(ValueError, match="trade volume_mwh must be a number"):
         handler_module.extract_persistence_event_parts(event)
 
@@ -278,7 +290,9 @@ def test_extract_persistence_event_parts_rejects_missing_trade_id():
         },
     ],
 )
-def test_extract_persistence_event_parts_rejects_empty_trade_id(event):
+def test_extract_persistence_event_parts_rejects_empty_trade_id(
+    event: dict[str, Any],
+) -> None:
 
     with pytest.raises(ValueError, match="trade_id must be a non-empty string"):
         handler_module.extract_persistence_event_parts(event)
@@ -313,7 +327,9 @@ def test_extract_persistence_event_parts_rejects_empty_trade_id(event):
         },
     ],
 )
-def test_extract_persistence_event_parts_rejects_empty_trade_product(event):
+def test_extract_persistence_event_parts_rejects_empty_trade_product(
+    event: dict[str, Any],
+) -> None:
 
     with pytest.raises(ValueError, match="product must be a non-empty string"):
         handler_module.extract_persistence_event_parts(event)
@@ -516,7 +532,9 @@ def test_trade_persistence_handler_rejects_missing_processed_at():
     dynamodb_table.put_item.assert_not_called()
 
 
-def test_build_persistence_dependencies_uses_environment_and_boto3(monkeypatch):
+def test_build_persistence_dependencies_uses_environment_and_boto3(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     s3_client = Mock()
     dynamodb_resource = Mock()
     dynamodb_table = Mock()
@@ -550,7 +568,9 @@ def test_build_persistence_dependencies_uses_environment_and_boto3(monkeypatch):
     }
 
 
-def test_lambda_handler_builds_dependencies_and_delegates(monkeypatch):
+def test_lambda_handler_builds_dependencies_and_delegates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     s3_client = Mock()
     dynamodb_table = Mock()
     context = Mock()
@@ -611,7 +631,9 @@ def test_lambda_handler_builds_dependencies_and_delegates(monkeypatch):
     assert response == expected_response
 
 
-def test_build_persistence_dependencies_requires_results_bucket_env(monkeypatch):
+def test_build_persistence_dependencies_requires_results_bucket_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv(
         handler_module.TRADE_RESULTS_BUCKET_ENV_VAR,
         raising=False,
@@ -628,7 +650,9 @@ def test_build_persistence_dependencies_requires_results_bucket_env(monkeypatch)
         handler_module.build_persistence_dependencies()
 
 
-def test_build_persistence_dependencies_requires_status_table_env(monkeypatch):
+def test_build_persistence_dependencies_requires_status_table_env(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv(
         handler_module.TRADE_STATUS_TABLE_ENV_VAR,
         raising=False,
@@ -645,7 +669,9 @@ def test_build_persistence_dependencies_requires_status_table_env(monkeypatch):
         handler_module.build_persistence_dependencies()
 
 
-def test_trade_persistence_handler_logs_and_reraises_unexpected_s3_put_failure(caplog):
+def test_trade_persistence_handler_logs_and_reraises_unexpected_s3_put_failure(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     s3_client = Mock()
     dynamodb_table = Mock()
 
@@ -681,8 +707,8 @@ def test_trade_persistence_handler_logs_and_reraises_unexpected_s3_put_failure(c
 
 
 def test_trade_persistence_handler_logs_and_reraises_unexpected_dynamodb_put_failure(
-    caplog,
-):
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     s3_client = Mock()
     dynamodb_table = Mock()
 

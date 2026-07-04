@@ -1,5 +1,7 @@
 import json
 import logging
+from typing import Any
+
 import pytest
 
 import sqs_trade_handler as sqs_module
@@ -27,7 +29,7 @@ TEST_PRODUCT = "UK Power"
 TEST_VOLUME_MWH = 250
 
 
-def assert_no_batch_failures(response):
+def assert_no_batch_failures(response: dict[str, list[dict[str, str]]]) -> None:
     assert response == {"batchItemFailures": []}
 
 
@@ -52,7 +54,9 @@ def test_sqs_trade_handler_returns_no_batch_failures_for_valid_record():
     assert_no_batch_failures(response)
 
 
-def test_sqs_trade_handler_records_non_retryable_missing_volume_mwh(caplog):
+def test_sqs_trade_handler_records_non_retryable_missing_volume_mwh(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     test_message_id = "msg-001"
     event = {
         "Records": [
@@ -103,14 +107,14 @@ def test_sqs_trade_handler_records_non_retryable_missing_volume_mwh(caplog):
     ],
 )
 def test_sqs_find_missing_required_field_returns_missing_field(
-    trade, expected_missing_field
-):
+    trade: dict[str, Any], expected_missing_field: str
+) -> None:
     missing_field = find_missing_required_field(trade, REQUIRED_FIELDS)
 
     assert missing_field == expected_missing_field
 
 
-def test_sqs_find_missing_required_field_returns_none_when_valid():
+def test_sqs_find_missing_required_field_returns_none_when_valid() -> None:
     trade = {
         "trade_id": TEST_TRADE_ID,
         "product": TEST_PRODUCT,
@@ -129,7 +133,10 @@ def test_sqs_find_missing_required_field_returns_none_when_valid():
         (0, ERROR_VOLUME_MWH_NOT_POSITIVE),
     ],
 )
-def test_sqs_validate_volume_mwh_rejects_invalid_values(volume_mwh, expected_error):
+def test_sqs_validate_volume_mwh_rejects_invalid_values(
+    volume_mwh: Any,
+    expected_error: str,
+) -> None:
     volume_mwh_error = validate_volume_mwh(volume_mwh)
 
     assert volume_mwh_error == expected_error
@@ -142,7 +149,7 @@ def test_sqs_validate_volume_mwh_rejects_invalid_values(volume_mwh, expected_err
         10.01,
     ],
 )
-def test_sqs_validate_volume_mwh_accepts_valid_values(volume_mwh):
+def test_sqs_validate_volume_mwh_accepts_valid_values(volume_mwh: int | float) -> None:
     volume_mwh_error = validate_volume_mwh(volume_mwh)
 
     assert volume_mwh_error is None
@@ -175,10 +182,10 @@ def test_sqs_validate_volume_mwh_accepts_valid_values(volume_mwh):
     ],
 )
 def test_sqs_trade_handler_records_non_retryable_missing_required_fields(
-    trade,
-    expected_error,
-    caplog,
-):
+    trade: dict[str, Any],
+    expected_error: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     caplog.set_level(logging.WARNING)
 
     event = {
@@ -207,8 +214,10 @@ def test_sqs_trade_handler_records_non_retryable_missing_required_fields(
     ],
 )
 def test_sqs_trade_handler_records_non_retryable_invalid_volume_mwh(
-    volume_mwh, expected_error, caplog
-):
+    volume_mwh: Any,
+    expected_error: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     caplog.set_level(logging.WARNING)
 
     event = {
@@ -258,8 +267,10 @@ def test_sqs_trade_handler_records_non_retryable_invalid_volume_mwh(
     ],
 )
 def test_sqs_trade_handler_records_non_retryable_invalid_json_body(
-    record, expected_error, caplog
-):
+    record: dict[str, Any],
+    expected_error: str,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     caplog.set_level(logging.WARNING)
 
     event = {"Records": [record]}
@@ -272,8 +283,8 @@ def test_sqs_trade_handler_records_non_retryable_invalid_json_body(
 
 
 def test_sqs_trade_handler_handles_mixed_batch_with_non_retryable_invalid_record(
-    caplog,
-):
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     caplog.set_level(logging.WARNING)
 
     event = {
@@ -308,8 +319,10 @@ def test_sqs_trade_handler_handles_mixed_batch_with_non_retryable_invalid_record
     assert_no_batch_failures(response)
 
 
-def test_sqs_trade_handler_handles_trade_with_retryable_record(monkeypatch):
-    def failing_persist_trade(trade):
+def test_sqs_trade_handler_handles_trade_with_retryable_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def failing_persist_trade(trade: dict[str, Any]) -> None:
         raise RuntimeError("S3 unavailable")
 
     monkeypatch.setattr(sqs_module, "persist_trade", failing_persist_trade)
@@ -334,10 +347,12 @@ def test_sqs_trade_handler_handles_trade_with_retryable_record(monkeypatch):
     assert response == {"batchItemFailures": [{"itemIdentifier": TEST_SQS_MESSAGE_ID}]}
 
 
-def test_sqs_trade_handler_persists_valid_trade(monkeypatch):
-    persisted_trades = []
+def test_sqs_trade_handler_persists_valid_trade(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    persisted_trades: list[dict[str, Any]] = []
 
-    def fake_persist_trade(trade):
+    def fake_persist_trade(trade: dict[str, Any]) -> None:
         persisted_trades.append(trade)
 
     monkeypatch.setattr(sqs_module, "persist_trade", fake_persist_trade)
@@ -365,12 +380,12 @@ def test_sqs_trade_handler_persists_valid_trade(monkeypatch):
 
 
 def test_sqs_trade_handler_handles_mixed_batch_with_retryable_persistence_failure(
-    monkeypatch,
-):
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     retryable_trade_id = "TRD-RETRYABLE-1001"
-    persisted_trade_ids = []
+    persisted_trade_ids: list[str] = []
 
-    def fake_persist_trade(trade):
+    def fake_persist_trade(trade: dict[str, Any]) -> None:
         persisted_trade_ids.append(trade["trade_id"])
         if trade["trade_id"] == retryable_trade_id:
             raise RuntimeError("S3 unavailable")
