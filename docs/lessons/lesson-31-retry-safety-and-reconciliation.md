@@ -1,6 +1,6 @@
-Related note: `docs/iam/persistence-handler-iam-checklist.md`
-
 # Lesson 31: Retry-Safe Persistence and Reconciliation Decision Note
+
+Related note: `docs/iam/persistence-handler-iam-checklist.md`
 
 ## Purpose
 
@@ -19,7 +19,7 @@ It is tutorial evidence only:
 ## Lesson spine
 
 | Lesson | What it established | Why it matters here |
-|---|---|---|
+| --- | --- | --- |
 | 28 | The persistence pieces were connected into one workflow shape. Accepted/rejected trade result artifacts are written to S3, and status records are written to DynamoDB. | There are now two persistence targets in one workflow boundary. |
 | 29 | S3 persistence can succeed, then DynamoDB persistence can fail afterward. | The workflow can enter a partial-persistence state. |
 | 30 | Least-privilege IAM was documented. Lambda owns S3/DynamoDB/log permissions; Step Functions owns Lambda invocation. | IAM does not fix retry correctness or partial persistence. |
@@ -38,7 +38,7 @@ Step Functions
 Known current responsibilities:
 
 | Responsibility | Current function |
-|---|---|
+| --- | --- |
 | Build S3 object key | `build_s3_key` |
 | Build accepted trade artifact | `build_accepted_trade_artifact` |
 | Build rejected trade artifact | `build_rejected_trade_artifact` |
@@ -73,7 +73,7 @@ Retrying the whole persistence Lambda is acceptable only when both of these are
 true:
 
 | Requirement | Why it matters |
-|---|---|
+| --- | --- |
 | S3 object key is deterministic for the same workflow input | A retry writes the same object path instead of creating duplicate artifacts. |
 | DynamoDB write behaviour is idempotent or explicitly classified | A retry does not silently overwrite or misclassify an existing status record. |
 
@@ -144,7 +144,7 @@ Existing trade_id    -> ConditionalCheckFailedException
 The important interpretation is:
 
 | Duplicate condition | Correct interpretation |
-|---|---|
+| --- | --- |
 | Existing record is identical to the retry attempt | Idempotent success, but only if the code verifies equivalence. |
 | Existing record has same `trade_id` but different status, S3 key, or processed timestamp | Business conflict or data integrity issue. Route to reconciliation. |
 | Code does not read/compare the existing record | Do not pretend it is idempotent success. Treat as duplicate/conflict or surface for review. |
@@ -156,7 +156,7 @@ write.
 ## Failure decision table
 
 | Failure point | State of S3 | State of DynamoDB | Recommended workflow behaviour | Reason |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | S3 `PutObject` fails before any DynamoDB write | No artifact written | No status record written | Step Functions may retry the Lambda for transient errors. Catch after retry exhaustion. | No partial persistence has occurred yet. |
 | S3 succeeds, DynamoDB transient failure | Artifact written | No status record written | Retry whole Lambda only if S3 key is deterministic. Otherwise route to reconciliation. | Retry may repair the missing status record, but only if repeat S3 write is safe. |
 | S3 succeeds, DynamoDB conditional duplicate with identical existing record | Artifact written | Status record already exists | Treat as idempotent success only if equivalence is verified. | The workflow outcome already exists. |
@@ -206,7 +206,7 @@ This is illustrative only. It is not deployment-ready Amazon States Language
 ## When to Retry, Catch, Fail, or Reconcile
 
 | Step Functions action | Use when |
-|---|---|
+| --- | --- |
 | `Retry` | The error is likely transient and repeating the Lambda is safe. |
 | `Catch` | Retries are exhausted or the error needs controlled routing. |
 | `Fail` | The workflow should stop because the input or state is invalid and no recovery path is useful. |
@@ -346,7 +346,7 @@ Before adding code or Terraform, confirm:
 ## SAP-C02 relevance
 
 | SAP-C02 area | Relevance |
-|---|---|
+| --- | --- |
 | Reliable architectures | Understand retry safety, partial failure, and idempotency. |
 | Secure architectures | Avoid broad permissions such as cleanup deletes unless justified. |
 | Operational excellence | Surface ambiguous states through Catch/reconciliation instead of hiding them. |
@@ -356,7 +356,7 @@ Before adding code or Terraform, confirm:
 ## Acronym legend
 
 | Acronym | Meaning |
-|---|---|
+| --- | --- |
 | ASL | Amazon States Language |
 | AWS | Amazon Web Services |
 | IAM | Identity and Access Management |

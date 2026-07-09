@@ -23,7 +23,7 @@ explained without relying on the tutorial prompt.
 ## Current Baseline
 
 | Capability | Status | Evidence |
-|---|---|---|
+| --- | --- | --- |
 | API-style Lambda request parsing and validation | Implemented | `trade_handler.py`, `tests/test_trade_handler.py` |
 | Correlation IDs and structured logging concepts | Implemented | API, EventBridge, and SQS handlers |
 | EventBridge event handling | Implemented | `eventbridge_trade_handler.py`, corresponding tests |
@@ -44,6 +44,8 @@ explained without relying on the tutorial prompt.
 | S3 key design and encryption assumptions | Implemented | Lesson 32 note documents accepted/rejected prefixes, deterministic keys, overwrite behavior, and bucket-level encryption assumptions |
 | Step Functions timeout and terminal failure | Implemented | Lesson 33 ASL definition and tests cover timeout, bounded retry, catch, reconciliation routing, and explicit terminal failure |
 | SQS poison-message and DLQ mental model | Implemented | Lesson 34A note explains poison messages, visibility timeout, maxReceiveCount, DLQ ownership, idempotency, and SQS versus Step Functions failure scope |
+| SQS retry and replay decision reasoning | Implemented | Lessons 34B and 34C document idempotent side effects, partial-success risk, DLQ triage, and replay safety boundaries |
+| EventBridge vs SQS vs direct Step Functions selection | Implemented | Lesson 35 decision note compares fact publication, queued work, and direct workflow orchestration |
 
 ## Active Sequence
 
@@ -56,6 +58,7 @@ explained without relying on the tutorial prompt.
 - [x] Add a minimal dependency file or `pyproject.toml` for reproducible setup.
 - [x] Add `.gitignore` coverage for `.venv`, caches, bytecode, and `.DS_Store`.
 - [x] Standardize formatting and import order without obscuring lesson intent.
+
 ### 2. Strengthen Python production shape
 
 - [ ] Introduce typed event/result helpers only where they reduce repeated
@@ -69,14 +72,14 @@ explained without relying on the tutorial prompt.
 
 ### 3. Deepen serverless behavior
 
-- [ ] Demonstrate Lambda retry and idempotency implications for each event
-  source.
-  Persistence-workflow retry/idempotency evidence is complete in Lesson 26;
-  event-source-specific retry implications remain open.
+- [ ] Compare retry and idempotency implications across EventBridge and direct
+  Step Functions invocation.
+  Persistence-workflow retry/idempotency evidence is complete in Lesson 26,
+  and SQS retry/idempotency/DLQ evidence is complete in Lessons 34A-34C.
 - [x] Add an explicit SQS poison-message and DLQ design exercise.
 - [x] Test mixed-success SQS batches and partial batch failure semantics.
 - [x] Add Step Functions timeout, retry, catch, and terminal-failure examples.
-- [ ] Compare EventBridge, SQS, and direct Step Functions invocation in a
+- [x] Compare EventBridge, SQS, and direct Step Functions invocation in a
   decision table.
 
 ### 4. Deepen persistence and IAM reasoning
@@ -155,10 +158,11 @@ Evidence:
 
 Weak area noted:
 
-- `lesson_1a_lambda_response.py` remains as an incomplete lesson artifact;
-  it calls undefined test functions and would fail if executed directly;
-  consider replacing it with a complete early-lesson example in a future
-  exercise.
+- `lesson_1a_lambda_response.py` remains an archived early-lesson artifact;
+  it now re-exports the completed Lesson 1 handler so scratch imports do not
+  leave the workspace in a broken state;
+  consider replacing it with a clearer historical note or removing it in a
+  future consolidation exercise.
 
 SAP-C02 mapping: Domain 3 operational excellence (code hygiene, reproducible
 setup, structured evidence).
@@ -299,6 +303,63 @@ SAP-C02 mapping: Domain 2 resilience and decoupling, Domain 3 operational
 excellence, and Domain 1 security boundary reasoning. This is tutorial evidence
 only, not Energy Data Lakehouse implementation.
 
+### Lesson 34B: SQS retry and idempotency implications
+
+Status: **Completed locally on 2026-07-10**.
+
+Evidence:
+
+- `docs/lessons/lesson-34b-sqs-retry-and-idempotency-implications.md`
+  explains that SQS retry safety depends on idempotent side effects rather than
+  on suppressing retries;
+- the note connects `batchItemFailures` to retry signalling, not business
+  rejection storage;
+- the lesson makes the partial-success risk explicit when persistence side
+  effects can succeed before a later exception causes the message to retry;
+- deterministic S3 keys and duplicate-safe DynamoDB behavior are described as
+  the conditions that make repeated processing safer;
+- full local suite passed: 218 tests.
+
+SAP-C02 mapping: Domain 2 resilience and decoupling, Domain 3 operational
+excellence, and Domain 1 boundary reasoning. This is tutorial evidence only,
+not Energy Data Lakehouse implementation.
+
+### Lesson 34C: SQS DLQ operational handling and replay decision model
+
+Status: **Completed locally on 2026-07-10**.
+
+Evidence:
+
+- `docs/lessons/lesson-34c-sqs-dlq-operational-handling-and-replay-decision-model.md`
+  defines the rule that a DLQ is quarantine, not automatic recovery;
+- the note adds failure-classification, replay-decision, and replay-safety
+  tables tied to the existing `sqs_trade_handler` retry boundary;
+- the lesson makes the operational distinction between replayable transient
+  failures and messages that should be archived, discarded, or fixed-first;
+- full local suite passed: 218 tests.
+
+SAP-C02 mapping: Domain 2 resilience and decoupling, Domain 3 operational
+excellence, and Domain 1 control-boundary reasoning. This is tutorial evidence
+only, not Energy Data Lakehouse implementation.
+
+### Lesson 35: EventBridge vs SQS vs direct Step Functions invocation
+
+Status: **Completed locally on 2026-07-10**.
+
+Evidence:
+
+- `docs/lessons/lesson-35-eventbridge-vs-sqs-vs-step-functions-invocation.md`
+  compares event publication, queued work, and direct workflow orchestration;
+- the note includes decision and failure-model tables showing when EventBridge,
+  SQS, or direct Step Functions invocation is the better fit;
+- the lesson connects the comparison back to the existing tutorial handlers and
+  Step Functions examples rather than introducing new deployment code;
+- full local suite passed: 218 tests.
+
+SAP-C02 mapping: Domain 2 integration and new-solution design, Domain 3
+operational reasoning, and Domain 1 boundary clarity. This is tutorial evidence
+only, not Energy Data Lakehouse implementation.
+
 ## Parked Topics
 
 - Docker and container packaging
@@ -313,7 +374,7 @@ Tutorial sessions may be logged in the SAP-C02 readiness tracker when they are
 mapped to a domain or weak area. Useful mappings include:
 
 | Tutorial topic | SAP-C02 relevance |
-|---|---|
+| --- | --- |
 | EventBridge, SQS, Step Functions | Domain 2 integration, decoupling, failure handling, and new-solution design |
 | S3 and DynamoDB persistence | Domain 2 storage selection and Domain 3 reliability/performance improvement |
 | IAM action/resource reasoning | Domain 1 organizational/security design and Domain 3 security improvement |

@@ -25,9 +25,11 @@ def build_persistence_dependencies() -> dict[str, Any]:
     if table_name is None:
         raise ValueError("Missing environment variable: TRADE_STATUS_TABLE_NAME")
 
+    dynamodb_resource: Any = boto3.resource("dynamodb")
+
     return {
         "s3_client": boto3.client("s3"),
-        "dynamodb_table": boto3.resource("dynamodb").Table(table_name),
+        "dynamodb_table": dynamodb_resource.Table(table_name),
         "bucket_name": bucket_name,
     }
 

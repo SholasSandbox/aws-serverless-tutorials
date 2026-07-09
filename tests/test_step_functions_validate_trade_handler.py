@@ -1,9 +1,10 @@
-from typing import Any
+from typing import Any, Mapping
 
 import pytest
 
 from step_functions_validate_trade_handler import (
     ERROR_INVALID_TRADE_INPUT,
+    ValidationResult,
     step_functions_validate_trade_handler,
 )
 
@@ -26,7 +27,7 @@ TEST_VOLUME_MWH = 250
 def apply_result_path(
     original_input: dict,
     result_path: str,
-    task_result: dict,
+    task_result: Mapping[str, Any] | ValidationResult,
 ) -> dict:
     if result_path != "$.validation":
         raise ValueError(f"Unsupported ResultPath: {result_path}")
@@ -40,7 +41,7 @@ def apply_result_path(
 def apply_catch_result_path(
     original_input: dict,
     result_path: str,
-    task_error: dict,
+    task_error: Mapping[str, Any],
 ) -> dict:
     if result_path != "$.task_error":
         raise ValueError(f"Unsupported Catch ResultPath: {result_path}")

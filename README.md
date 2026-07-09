@@ -23,7 +23,7 @@ patterns that support SAP-C02 study, including:
 ## Current Exercises
 
 | Area | Main files | Current evidence |
-|---|---|---|
+| --- | --- | --- |
 | API-style Lambda validation | `trade_handler.py` | request parsing, validation, logging, stable success/error responses |
 | EventBridge handling | `eventbridge_trade_handler.py` | detail validation and correlation using event IDs |
 | SQS handling | `sqs_trade_handler.py` | record parsing, validation, and partial batch response behavior |

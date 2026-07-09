@@ -606,10 +606,12 @@ def test_lambda_handler_builds_dependencies_and_delegates(
 
     fake_trade_persistence_handler = Mock(return_value=expected_response)
 
+    mocked_build_persistence_dependencies = Mock(return_value=fake_dependencies)
+
     monkeypatch.setattr(
         handler_module,
         "build_persistence_dependencies",
-        Mock(return_value=fake_dependencies),
+        mocked_build_persistence_dependencies,
     )
     monkeypatch.setattr(
         handler_module,
@@ -619,7 +621,7 @@ def test_lambda_handler_builds_dependencies_and_delegates(
 
     response = handler_module.lambda_handler(event, context)
 
-    handler_module.build_persistence_dependencies.assert_called_once_with()
+    mocked_build_persistence_dependencies.assert_called_once_with()
     fake_trade_persistence_handler.assert_called_once_with(
         event,
         context,

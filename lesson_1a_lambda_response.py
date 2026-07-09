@@ -1,16 +1,12 @@
-# Early lesson 1a scaffold — incomplete draft. The test functions called below
-# were never defined; this file is preserved as a lesson history artifact only.
-# It is not part of the production handler suite and is not referenced by tests.
+"""Archived Lesson 1a scaffold.
+
+This file is kept as a tutorial-history artifact. It re-exports the completed
+early lesson handler so archived scratch scripts can still import a valid
+symbol without reviving the unfinished draft test calls that used to live here.
+"""
+
+from lesson_1_lambda_response import lambda_handler
 
 
 if __name__ == "__main__":
-    test_valid_event()
-    test_missing_trade_id()
-    test_missing_product()
-    test_missing_volume_mwh()
-    test_zero_volume_mwh()
-    test_negative_volume_mwh()
-    test_string_volume_mwh()
-    test_boolean_volume_mwh()
-
-    print("All tests passed")
+    print("Lesson 1a scaffold archived. Use lesson_1_lambda_response.py instead.")

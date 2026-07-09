@@ -36,7 +36,7 @@ create queues, create event buses, or modify handler code.
 Use this first-pass rule:
 
 | Pattern | Use when the producer means... | Best phrase |
-|---|---|---|
+| --- | --- | --- |
 | EventBridge | Something happened | Publish facts |
 | SQS | Something needs to be processed | Queue work |
 | Direct Step Functions | This known workflow must start | Orchestrate workflows |
@@ -135,7 +135,7 @@ and message-level DLQ handling.
 ### EventBridge is a good fit when
 
 | Requirement | Fit |
-|---|---|
+| --- | --- |
 | Multiple consumers may react to the same event | Strong |
 | Producer should not know downstream consumers | Strong |
 | Event routing by pattern is important | Strong |
@@ -236,7 +236,7 @@ work.
 ### SQS is a good fit when
 
 | Requirement | Fit |
-|---|---|
+| --- | --- |
 | Buffering between producer and consumer | Strong |
 | Consumer may be slower than producer | Strong |
 | Message-level retry is needed | Strong |
@@ -371,7 +371,7 @@ does not give this step-by-step process model.
 ### Direct Step Functions is a good fit when
 
 | Requirement | Fit |
-|---|---|
+| --- | --- |
 | Multi-step process | Strong |
 | Branching by validation result | Strong |
 | Retry/Catch per workflow state | Strong |
@@ -385,7 +385,7 @@ does not give this step-by-step process model.
 ## Decision table
 
 | Question | Prefer EventBridge | Prefer SQS | Prefer direct Step Functions |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | What is the producer doing? | Publishing a fact | Enqueuing work | Starting a known workflow |
 | Does producer know the consumer? | No | Knows queue/work contract | Yes |
 | Is fan-out important? | Strong fit | Possible, not primary | Weak fit |
@@ -402,7 +402,7 @@ does not give this step-by-step process model.
 ## Failure model comparison
 
 | Failure area | EventBridge | SQS | Direct Step Functions |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | Target unavailable | EventBridge retry/DLQ for event target delivery | Message remains available for retry after visibility timeout | Task-level Retry/Catch |
 | Consumer code raises | Target-specific failure handling | Message can retry and eventually DLQ | State can retry/catch/fail |
 | Partial batch handling | Not the core model | Core SQS/Lambda concern | Not the model |
@@ -453,7 +453,7 @@ The failure is workflow execution.
 ## Coupling comparison
 
 | Pattern | Coupling level | Explanation |
-|---|---:|---|
+| --- | ---: | --- |
 | EventBridge | Lowest | Producer emits a fact; consumers can change independently |
 | SQS | Medium-low | Producer knows the queue/work contract, not consumer implementation |
 | Direct Step Functions | Highest | Caller knows and starts a specific workflow |
@@ -768,7 +768,7 @@ SAP-C02 questions usually describe constraints, not service names. Read the
 scenario language.
 
 | Scenario phrase | Likely pattern |
-|---|---|
+| --- | --- |
 | Multiple systems need to react to the same business event | EventBridge |
 | Producer should not know consumers | EventBridge |
 | Route events based on event content | EventBridge |
@@ -830,7 +830,7 @@ Step Functions:
 In architecture terms:
 
 | Pattern | Main strength |
-|---|---|
+| --- | --- |
 | EventBridge | Loose event routing and fan-out |
 | SQS | Durable work buffering and message-level retry |
 | Step Functions | Explicit workflow orchestration and execution history |
@@ -855,7 +855,7 @@ What operational evidence will we need when it fails?
 ## Acronym legend
 
 | Acronym | Meaning |
-|---|---|
+| --- | --- |
 | API | Application Programming Interface |
 | AWS | Amazon Web Services |
 | DLQ | Dead-Letter Queue |
