@@ -6,18 +6,17 @@ import pytest
 
 import sqs_trade_handler as sqs_module
 from sqs_trade_handler import (
-    sqs_trade_handler,
-    ERROR_JSON_BODY_NOT_OBJECT,
     ERROR_INVALID_JSON_BODY,
+    ERROR_JSON_BODY_NOT_OBJECT,
     ERROR_MISSING_REQUIRED_FIELD,
+    sqs_trade_handler,
 )
-
-from trade_handler import (
-    find_missing_required_field,
-    validate_volume_mwh,
-    REQUIRED_FIELDS,
+from trade_validation import (
     ERROR_VOLUME_MWH_NOT_NUMBER,
     ERROR_VOLUME_MWH_NOT_POSITIVE,
+    REQUIRED_FIELDS,
+    find_missing_required_field,
+    validate_volume_mwh,
 )
 
 TEST_SQS_MESSAGE_ID = "sqs-message-id-456"

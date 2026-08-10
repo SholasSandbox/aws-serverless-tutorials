@@ -31,6 +31,7 @@ patterns that support SAP-C02 study, including:
 | S3 result persistence | `trade_result_persistence.py` | accepted/rejected artifacts and partitioned object keys |
 | DynamoDB status persistence | `trade_status_persistence.py` | stable status records and S3 pointers |
 | Combined persistence workflow | `trade_persistence_workflow.py`, `trade_persistence_handler.py` | S3 and DynamoDB orchestration with injected clients |
+| API-to-workflow handoff | `api_workflow_handoff.py` | HTTP boundary normalization and injected Step Functions `StartExecution` calls |
 | Tests | `tests/` | unit tests using mocks rather than live AWS resources |
 
 ## Workspace Boundary

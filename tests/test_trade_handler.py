@@ -4,16 +4,18 @@ from typing import Any
 import pytest
 
 import trade_handler
+from eventbridge_trade_handler import eventbridge_trade_handler
 from trade_handler import (
+    build_internal_trade,
+    get_request_id,
+    internal_error_response,
     lambda_handler,
+    parse_json_body,
+)
+from trade_validation import (
     find_missing_required_field,
     validate_volume_mwh,
-    parse_json_body,
-    internal_error_response,
-    get_request_id,
 )
-
-from eventbridge_trade_handler import eventbridge_trade_handler
 
 REQUIRED_FIELDS = ["trade_id", "product", "volume_mwh"]
 
@@ -191,7 +193,9 @@ def test_find_missing_required_field_returns_none_when_valid():
         {"body": json.dumps(None)},  # valid JSON, but not a dict
     ],
 )
-def test_lambda_handler_returns_400_for_invalid_json_body(event: dict[str, Any]) -> None:
+def test_lambda_handler_returns_400_for_invalid_json_body(
+    event: dict[str, Any],
+) -> None:
     response = lambda_handler(event, None)
 
     response_body = json.loads(response["body"])
@@ -448,3 +452,20 @@ def test_eventbridge_trade_handler_missing_required_field_returns_rejected():
 
     assert response["status"] == "rejected"
     assert "trade_id" in response["error"]
+
+
+def test_build_internal_trade():
+    request_body = {
+        "trade_id": "TRD-1001",
+        "product": "UK Power",
+        "volume_mwh": 250,
+        "unexpected_external_field": "DO-NOT-PASS-THROUGH",
+    }
+
+    internal_trade = build_internal_trade(request_body)
+
+    assert internal_trade == {
+        "trade_id": "TRD-1001",
+        "product": "UK Power",
+        "volume_mwh": 250,
+    }

@@ -1,5 +1,7 @@
 # Lesson 34C: SQS DLQ Operational Handling and Replay Decision Model
 
+Last reviewed: 2026-07-26
+
 ## Objective
 
 Lesson 34C explains what to do after an SQS message has reached a dead-letter
@@ -297,6 +299,10 @@ Redrive does not modify message payloads.
 Redrive does not add idempotency to the consumer.
 ```
 
+The body is not transformed, but redriven messages are treated as new queue
+messages: SQS assigns a new message ID and enqueue time and resets the retention
+period. Do not use the old SQS message ID as the business idempotency key.
+
 If a message is malformed, replaying it unchanged usually recreates the same
 failure.
 
@@ -323,6 +329,12 @@ Reason:
 A message may spend time in the source queue before it moves to the DLQ.
 If the DLQ retention period is too short, evidence can expire before operators investigate it.
 ```
+
+For a standard queue, expiration continues to use the original enqueue
+timestamp even after the message moves to the DLQ; the DLQ age metric reflects
+time since movement. For a FIFO queue, the enqueue timestamp resets on movement
+to the DLQ. The “DLQ retention longer than source retention” rule remains the
+safe default, especially for standard queues.
 
 For this tutorial, do not configure queues. Just understand the architecture
 implication:

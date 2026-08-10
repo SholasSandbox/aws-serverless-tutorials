@@ -2,13 +2,12 @@ import json
 import logging
 from typing import Any
 
-from trade_handler import (
+from trade_handler import UNKNOWN_REQUEST_ID
+from trade_validation import (
     REQUIRED_FIELDS,
-    UNKNOWN_REQUEST_ID,
     find_missing_required_field,
     validate_volume_mwh,
 )
-
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

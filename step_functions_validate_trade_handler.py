@@ -1,12 +1,11 @@
 import logging
 from typing import Any, TypedDict
 
-from trade_handler import (
+from trade_validation import (
     REQUIRED_FIELDS,
     find_missing_required_field,
     validate_volume_mwh,
 )
-
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

@@ -1,5 +1,7 @@
 # Lesson 33: Step Functions Timeout and Terminal-Failure Behaviour
 
+Last reviewed: 2026-07-26
+
 ## Purpose
 
 This lesson documents how the persistence workflow handles timeout, retry,
@@ -49,7 +51,7 @@ The lesson accepts this shape:
 ```text
 Task timeout
 + bounded retry
-+ catch all exhausted failures
++ catch broadly after the configured retries are exhausted
 + route to reconciliation
 + terminate with explicit Fail state
 ```
@@ -63,11 +65,24 @@ succeeded when S3 may have written an artifact before DynamoDB failed.
 |---|---|---|
 | Lambda integration | `arn:aws:states:::lambda:invoke` | Step Functions invokes Lambda only; it does not directly write to S3 or DynamoDB. |
 | Timeout | `TimeoutSeconds: 30` | A hung persistence task has a bounded runtime. |
-| Retry errors | Lambda throttling/service/client errors plus `States.Timeout` | Transient failures can be retried before failure handling runs. |
+| Retry errors | Named Lambda throttling/service/client errors plus `States.Timeout` | Those exact error names are retried before failure handling runs. Lambda runtime timeouts may use different names. |
 | Retry limits | `MaxAttempts: 3`, `IntervalSeconds: 2`, `BackoffRate: 2.0` | Retry is bounded and does not hide persistent failure. |
 | Result preservation | `ResultPath: $.persistence_result` | Success output is kept without replacing the full input. |
 | Failure preservation | `ResultPath: $.persistence_error` | Failure context remains available for reconciliation. |
 | Terminal state | `PersistenceFailed` | Exhausted failure is explicit and visible. |
+
+`States.ALL` is broad but not literal “catch every possible failure.” It cannot
+catch `States.DataLimitExceeded` or `States.Runtime`. Also, newer Lambda
+runtimes may report a function timeout as `Sandbox.Timedout` (historically
+`Lambda.Unknown`) rather than the task-level `States.Timeout` currently listed
+in this example's `Retry`. Those runtime timeout names currently fall through
+to the catcher instead of receiving the configured retry. A deployment that
+requires retrying them must add and test the appropriate error names.
+
+`RouteToManualReconciliation` is currently a `Pass` state that records
+`reconciliation_required` and then enters `Fail`. It preserves intent inside
+the execution history; it does not itself create a ticket, send a message, or
+invoke a human-operated reconciliation process.
 
 ## Trade-off
 
@@ -95,7 +110,7 @@ It verifies that the ASL definition:
 - invokes Lambda through the Step Functions Lambda integration;
 - uses `TimeoutSeconds`;
 - has bounded retry settings;
-- catches exhausted failures into `$.persistence_error`;
+- catches supported exhausted failures into `$.persistence_error`;
 - routes caught failures to manual reconciliation;
 - terminates through a `Fail` state;
 - does not call S3 or DynamoDB directly;
@@ -119,3 +134,8 @@ Result: `217 passed`.
 
 This is Python/serverless tutorial evidence only. It is a candidate pattern for
 later adaptation elsewhere, not Energy Data Lakehouse implementation evidence.
+
+## References
+
+- AWS Step Functions error handling:
+  <https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html>

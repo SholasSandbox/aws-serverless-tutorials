@@ -1,17 +1,15 @@
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
 
-from unittest.mock import Mock
-
 from trade_result_persistence import (
-    STATUS_ACCEPTED,
-    STATUS_REJECTED,
     ARTIFACT_TYPE_ACCEPTED,
     ARTIFACT_TYPE_REJECTED,
     SCHEMA_VERSION,
+    STATUS_ACCEPTED,
+    STATUS_REJECTED,
 )
-
 from trade_status_persistence import (
     build_trade_status_record,
     build_trade_status_record_from_artifact,

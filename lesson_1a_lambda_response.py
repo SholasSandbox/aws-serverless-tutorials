@@ -7,6 +7,8 @@ symbol without reviving the unfinished draft test calls that used to live here.
 
 from lesson_1_lambda_response import lambda_handler
 
+__all__ = ["lambda_handler"]
+
 
 if __name__ == "__main__":
     print("Lesson 1a scaffold archived. Use lesson_1_lambda_response.py instead.")

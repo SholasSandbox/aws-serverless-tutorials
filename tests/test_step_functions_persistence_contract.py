@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-
 STEP_FUNCTIONS_DIR = Path("step-functions")
 
 

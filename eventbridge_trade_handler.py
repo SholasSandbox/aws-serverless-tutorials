@@ -2,9 +2,11 @@ import logging
 from typing import Any
 
 from trade_handler import (
-    UNKNOWN_REQUEST_ID,
-    REQUIRED_FIELDS,
     STATUS_RECEIVED,
+    UNKNOWN_REQUEST_ID,
+)
+from trade_validation import (
+    REQUIRED_FIELDS,
     find_missing_required_field,
     validate_volume_mwh,
 )

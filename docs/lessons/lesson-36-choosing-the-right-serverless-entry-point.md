@@ -1,5 +1,7 @@
 # Lesson 36: Choosing the Right Serverless Entry Point
 
+Last reviewed: 2026-07-27
+
 ## Objective
 
 Choose the correct entry point for a serverless workload by identifying what the
@@ -31,8 +33,10 @@ By the end of this lesson, you should be able to explain:
   exclusive choices;
 - which entry point fits each trade-processing scenario in the tutorial.
 
-This is a design-decision lesson. It does not add production code, AWS
-resources, Terraform, `boto3` calls, or new tests.
+This is a design-decision lesson. Its evidence level is **Conceptual**. It
+does not add production code, AWS resources, Infrastructure as Code, `boto3`
+calls, or new tests, and it does not preselect the implementation pattern for a
+later API-to-workflow vertical slice.
 
 ---
 
@@ -130,7 +134,8 @@ The entry point then influences:
 - retry ownership;
 - failure reporting;
 - message or request shape;
-- the responsibility of the first Lambda function.
+- whether the first integration needs custom code;
+- the responsibility of the first Lambda function, if Lambda is used.
 
 This lesson also prepares the next implementation boundary:
 
@@ -141,8 +146,9 @@ Lesson 37:
   internal service Lambda
 ```
 
-Lesson 36 chooses the doorway. Lesson 37 will decide what the first Lambda
-behind that doorway should understand and own.
+Lesson 36 chooses the doorway. Lesson 37 first asks whether that doorway needs
+a Lambda at all. If it does, Lesson 37 then defines what the API-facing Lambda
+should understand and own.
 
 ---
 
@@ -185,7 +191,7 @@ For example:
 ```text
 External caller
   → API Gateway
-  → API-facing Lambda
+  → direct AWS service integration or API-facing Lambda
   → SQS
   → worker Lambda
 ```
@@ -193,8 +199,10 @@ External caller
 Here:
 
 - API Gateway is the external entry point;
+- the handoff may be direct when request mapping and IAM are sufficient;
+- an API-facing Lambda is justified only when custom boundary code is needed;
 - SQS is the durable asynchronous handoff;
-- Lambda performs bounded processing.
+- the worker Lambda performs bounded processing.
 
 Another example:
 
@@ -300,19 +308,25 @@ The design must consider:
 - protection from malformed or hostile traffic;
 - mapping the external request into an internal domain shape.
 
-A simplified flow is:
+A simplified flow has two legitimate shapes:
 
 ```text
 External client
     ↓ HTTP
 API Gateway
-    ↓ Lambda event
-API-facing Lambda
-    ↓ normalized internal input
+    ├── direct AWS service integration
+    │      ↓ mapped internal input
+    └── API-facing Lambda
+           ↓ normalized internal input
 Internal processing
 ```
 
-The API-facing Lambda usually understands HTTP-specific information such as:
+Use a direct integration when API Gateway request mapping, authentication and
+IAM can express the boundary without application code. Use an API-facing
+Lambda when the boundary requires non-trivial validation, identity translation,
+idempotency logic, dynamic routing or custom response mapping.
+
+When Lambda is used, it usually understands HTTP-specific information such as:
 
 ```python
 http_method = event["requestContext"]["http"]["method"]
@@ -329,7 +343,17 @@ API Gateway exposes the HTTP boundary. It does not mean that the entire
 business process should complete synchronously behind one request.
 
 After validating and normalising an HTTP request, the system may hand off work
-to another service.
+to another service. API Gateway supports direct AWS service integrations for
+several relevant operations, including SQS `SendMessage`, EventBridge
+`PutEvents`, and Step Functions `StartExecution`. A Lambda is therefore an
+option, not a mandatory hop.
+
+```text
+API Gateway
+  → direct SQS SendMessage integration
+```
+
+or:
 
 ```text
 API Gateway
@@ -337,7 +361,14 @@ API Gateway
   → SQS
 ```
 
-This is suitable when durable asynchronous processing is required.
+These are suitable when durable asynchronous processing is required.
+
+```text
+API Gateway
+  → direct Step Functions StartExecution integration
+```
+
+or:
 
 ```text
 API Gateway
@@ -345,16 +376,12 @@ API Gateway
   → Step Functions
 ```
 
-This is suitable when the request intentionally starts a known workflow.
+These are suitable when the request intentionally starts a known workflow.
+The Lambda-mediated version is justified only when code is required at the
+boundary.
 
-```text
-API Gateway
-  → API-facing Lambda
-  → EventBridge
-```
-
-This can be suitable when the request results in a business fact that multiple
-internal consumers may react to.
+The same decision applies when the request publishes a business fact through
+EventBridge.
 
 ### Trade example: synchronous validation
 
@@ -390,23 +417,27 @@ A submitted trade must pass through several internal processing steps, but the
 user interface should not wait for the full workflow.
 ```
 
-Design:
+Design options:
 
 ```text
 Trading UI
     ↓ POST /trades
 API Gateway
-    ↓
-API-facing Lambda
-    ↓
-validate request envelope
-    ↓
-SQS or Step Functions
+    ├── direct SQS or Step Functions integration
+    └── API-facing Lambda when custom boundary code is required
+            ↓
+         SQS or Step Functions
     ↓
 202 Accepted
 ```
 
 The HTTP response confirms acceptance, not completion.
+
+Return `202 Accepted` only after the chosen handoff—such as `SendMessage` or
+`StartExecution`—has itself succeeded. For a direct integration, API Gateway
+must map the successful service response to the public `202` contract. If the
+handoff fails, the system has not accepted responsibility for later processing
+and should return an appropriate failure instead of a misleading `202`.
 
 That distinction must be explicit:
 
@@ -1420,20 +1451,20 @@ This scenario demonstrates that the services are not always competing choices.
 External client
     ↓ HTTP
 API Gateway
-    ↓
-API-facing Lambda
-    ↓ workflow input
+    ├── direct StartExecution integration
+    └── API-facing Lambda when custom code is required
+            ↓ workflow input
 Step Functions
     ↓
 internal task Lambdas
 ```
 
 From the external caller's perspective, API Gateway is the system entry point.
+Step Functions is the orchestration boundary. The architecture decision is
+whether API Gateway can map the public request directly or whether a Lambda is
+needed to perform non-trivial boundary logic.
 
-From the API-facing Lambda's perspective, Step Functions is the orchestration
-entry point.
-
-Each service owns a different boundary.
+Each selected component must own a distinct responsibility.
 
 ### Scenario 6: Business event creates durable consumer work
 
@@ -1619,8 +1650,9 @@ A public client should not normally need to know:
 - internal correlation conventions;
 - AWS-specific error shapes.
 
-API Gateway and an API-facing Lambda can shield and translate the external
-contract.
+API Gateway request mapping and authorisation can shield and translate a
+simple external contract. Add an API-facing Lambda only when custom code is
+needed at that boundary.
 
 ### 7. Assuming asynchronous means reliable
 
@@ -1855,7 +1887,7 @@ This lesson does not implement:
 - AWS SDK clients;
 - IAM policies;
 - infrastructure definitions;
-- Terraform;
+- Infrastructure as Code;
 - live AWS deployment;
 - new tests.
 
@@ -1870,21 +1902,25 @@ The next likely lesson is:
 
 ```text
 Lesson 37:
-  API-facing Lambda
-  versus
+  direct integration or API-facing Lambda
+  and
   internal service Lambda
 ```
 
 Lesson 37 should answer:
 
 ```text
-Once the entry point has been chosen, what responsibility belongs in the first
-Lambda?
+Once the entry point has been chosen, is a Lambda required at the boundary?
+If it is, what responsibility belongs in that Lambda?
 ```
 
 The expected distinction is:
 
 ```text
+Direct API Gateway service integration
+  uses configured request mapping and IAM
+  avoids Lambda when custom code is unnecessary
+
 API-facing Lambda
   understands HTTP
   reads request and identity context
@@ -1912,7 +1948,7 @@ Lesson 36:
   choose how input enters the system
 
 Lesson 37:
-  design the Lambda responsibility behind that entry point
+  decide whether the boundary needs Lambda and, if so, design its responsibility
 ```
 
 ---
@@ -1933,9 +1969,23 @@ questions without reading the lesson:
 8. How does an external caller's contract differ from an internal service
    contract?
 9. Which form of decoupling does each of the four services provide?
-10. Where should Lesson 36 stop before Lesson 37 begins?
+10. When can an API Gateway direct integration remove an API-facing Lambda?
+11. Where should Lesson 36 stop before Lesson 37 begins?
 
 ---
+
+## References
+
+- API Gateway HTTP API AWS service integrations:
+  <https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-develop-integrations-aws-services.html>
+- API Gateway HTTP API integration subtypes, including SQS, EventBridge and
+  Step Functions operations:
+  <https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-develop-integrations-aws-services-reference.html>
+- API Gateway direct integration with Step Functions `StartExecution`:
+  <https://docs.aws.amazon.com/step-functions/latest/dg/tutorial-api-gateway.html>
+- Step Functions `StartExecution` request, idempotency and execution-name
+  rules:
+  <https://docs.aws.amazon.com/step-functions/latest/apireference/API_StartExecution.html>
 
 ## Acronym Legend
 

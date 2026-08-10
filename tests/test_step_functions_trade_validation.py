@@ -1,7 +1,6 @@
 import json
 from pathlib import Path
 
-
 TASK_STATE_MACHINE_PATH = Path("step-functions/trade-validation-with-task.asl.json")
 RETRY_CATCH_STATE_MACHINE_PATH = Path(
     "step-functions/trade-validation-with-retry-catch.asl.json"

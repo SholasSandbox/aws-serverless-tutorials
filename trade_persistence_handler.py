@@ -1,12 +1,11 @@
-import os
 import logging
-
+import os
 from typing import Any
 
 import boto3
 
-from trade_status_persistence import find_missing_required_field
 from trade_persistence_workflow import persist_trade_processing_result
+from trade_status_persistence import find_missing_required_field
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)

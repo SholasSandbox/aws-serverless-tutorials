@@ -1,9 +1,7 @@
 import json
 import re
-
 from datetime import UTC, datetime
 from typing import Any
-
 
 SCHEMA_VERSION = "1.0"
 DEFAULT_BASE_PREFIX = "trade-results"

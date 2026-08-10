@@ -1,5 +1,7 @@
 # Lesson 28: Persistence Handler Boundary Hardening
 
+Last reviewed: 2026-07-26
+
 ## Purpose
 
 This note records what Lesson 28 established about hardening the Lambda
@@ -24,7 +26,8 @@ Lesson 28 rewrote `trade_persistence_handler.py` to production shape:
 - typed internal helpers for repeated validation patterns;
 - structured error logging with `trade_id` context on unexpected failures;
 - clean separation between the Lambda boundary and the workflow layer;
-- environment variable validation at cold-start via `build_persistence_dependencies`.
+- environment variable validation before dependency construction on each
+  current `lambda_handler` invocation via `build_persistence_dependencies`.
 
 
 ## Module: `trade_persistence_handler.py`
@@ -122,8 +125,11 @@ TRADE_RESULTS_BUCKET_ENV_VAR = "TRADE_RESULTS_BUCKET"
 TRADE_STATUS_TABLE_ENV_VAR = "TRADE_STATUS_TABLE_NAME"
 ```
 
-This fails loudly at cold-start rather than silently at the first S3 or
-DynamoDB call with an unhelpful boto3 error.
+In the current code, `lambda_handler` calls this function on every invocation.
+It therefore fails before the first S3 or DynamoDB call when a required name is
+missing; it is not a module-import or guaranteed cold-start-only check. The
+presence check also does not prove that the configured bucket or table name is
+correct or authorized.
 
 
 ## Tests established
@@ -171,7 +177,9 @@ caller has already checked the event shape. This is deliberate:
 - Putting it at the handler boundary means the workflow only runs when the
   input is already known-good.
 
-The pattern is: **validate at the edge, trust inside**.
+The pattern is: **validate the transport shape at the Lambda edge, then keep
+the workflow's own invariants explicit**. Internal callers and mappings can
+still be wrong, so “internal” must not mean “trust every payload blindly.”
 
 ## What this module does not own
 
@@ -185,7 +193,7 @@ The pattern is: **validate at the edge, trust inside**.
 |---|---|
 | Reliable architectures | Boundary validation prevents malformed input from reaching AWS APIs, reducing the surface area for partial-failure states. |
 | Operational excellence | Structured logging with `trade_id` context makes failures observable and debuggable. Re-raising instead of swallowing keeps the failure signal visible to Step Functions. |
-| Secure architectures | Environment variable validation at cold-start ensures the Lambda never runs without its required configuration, preventing silent permission errors or writes to unintended buckets. |
+| Secure architectures | Invocation-time presence checks stop the handler before AWS calls when required resource names are absent. IAM and resource policies must still authorize the intended bucket and table; presence checks do not validate correctness or permissions. |
 
 ## Acronym legend
 

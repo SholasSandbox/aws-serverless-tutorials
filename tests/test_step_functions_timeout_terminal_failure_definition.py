@@ -1,8 +1,6 @@
 import json
 from pathlib import Path
 
-
-
 STATE_MACHINE_PATH = Path(
     "step-functions/persistence-task-timeout-terminal-failure.asl.json"
 )

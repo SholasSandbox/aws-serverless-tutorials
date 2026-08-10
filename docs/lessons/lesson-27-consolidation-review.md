@@ -1,5 +1,7 @@
 # Lesson 27: Consolidation Review
 
+Last reviewed: 2026-07-26
+
 ## Purpose
 
 This note records what Lesson 27 established through a structured review of
@@ -88,10 +90,10 @@ The `archive/` directory was reviewed:
 | `archive/step_sample.json` | Step Functions sample event, retained as reference |
 | `archive/json` | Empty file with no extension. Deleted. |
 
-`lesson_1a_lambda_response.py` in the root was annotated with a header
-comment explaining it is an incomplete early-lesson draft that calls
-undefined functions. It is not part of the production handler suite and is
-not collected by pytest.
+`lesson_1a_lambda_response.py` in the root is now an archived scaffold. It
+re-exports the completed Lesson 1 handler and prints a harmless explanatory
+message when run directly. It is not part of the production handler suite and
+is not collected by pytest.
 
 ### README.md correction
 
@@ -125,9 +127,9 @@ hardening work.
 
 ## Weak area noted
 
-`lesson_1a_lambda_response.py` remains as a broken early artifact. It calls
-undefined test functions and would fail if executed directly. A future exercise
-could replace it with a complete, runnable early-lesson example.
+The original broken Lesson 1a draft is no longer a current weak area. The file
+is retained only as tutorial history and now points readers to the completed
+Lesson 1 implementation.
 
 ## SAP-C02 relevance
 

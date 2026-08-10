@@ -1,7 +1,8 @@
-import pytest
 import json
-
 from unittest.mock import Mock
+
+import pytest
+
 from trade_result_persistence import (
     build_accepted_trade_artifact,
     build_rejected_trade_artifact,

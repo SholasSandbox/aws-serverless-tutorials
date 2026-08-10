@@ -1,5 +1,7 @@
 # Lesson 26: DynamoDB Status Records and Idempotency
 
+Last reviewed: 2026-07-26
+
 ## Purpose
 
 This note records what Lesson 26 established about writing trade status records
@@ -105,7 +107,7 @@ Response when the conditional check fails (duplicate treated as idempotent):
 ```python
 {
     "trade_id": "TRD-001",
-    "result_type": "ACCEPTED",
+    "result_type": "accepted",
     "status": "already_persisted",
 }
 ```
@@ -167,10 +169,18 @@ contradictory status record.
 ## Weak area noted
 
 The `conditional_check_failed_exception` parameter requires the caller to
-inject the real `botocore.exceptions.ClientError` type in production. If the
-caller forgets, duplicate writes will silently raise instead of returning
-`already_persisted`. A future exercise could add a production integration test
-that injects the real boto3 exception type.
+inject the generated DynamoDB
+`ConditionalCheckFailedException` class—for example,
+`dynamodb_table.meta.client.exceptions.ConditionalCheckFailedException`—or to
+catch `botocore.exceptions.ClientError` and explicitly verify that
+`Error.Code == "ConditionalCheckFailedException"`. Catching every
+`ClientError` as a duplicate would incorrectly hide throttling, permissions,
+missing-resource, and other service failures.
+
+If the caller does not supply the specific exception class, duplicate writes
+raise instead of returning `already_persisted`. A future exercise should test
+the real Boto3 exception path and verify equivalence before classifying the
+existing item as idempotent success.
 
 ## SAP-C02 relevance
 

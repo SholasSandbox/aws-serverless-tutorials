@@ -2,15 +2,18 @@ import json
 import logging
 from typing import Any
 
+from trade_validation import (
+    REQUIRED_FIELDS,
+    find_missing_required_field,
+    validate_volume_mwh,
+)
+
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
-REQUIRED_FIELDS = ["trade_id", "product", "volume_mwh"]
-
 ERROR_INVALID_JSON_BODY = "Invalid or missing JSON body"
 ERROR_INTERNAL_SERVER = "Internal server error"
-ERROR_VOLUME_MWH_NOT_NUMBER = "volume_mwh must be a number"
-ERROR_VOLUME_MWH_NOT_POSITIVE = "volume_mwh must be greater than 0"
+
 
 UNKNOWN_REQUEST_ID = "unknown-request-id"
 STATUS_RECEIVED = "received"
@@ -34,27 +37,6 @@ def parse_json_body(event: dict[str, Any]) -> dict[str, Any] | None:
         return None
 
     return parsed_body
-
-
-def find_missing_required_field(
-    body: dict[str, Any], required_fields: list[str]
-) -> str | None:
-    for field in required_fields:
-        if field not in body:
-            return field
-
-    return None
-
-
-def validate_volume_mwh(volume_mwh: Any) -> str | None:
-    if isinstance(volume_mwh, bool):
-        return ERROR_VOLUME_MWH_NOT_NUMBER
-    elif not isinstance(volume_mwh, (int, float)):
-        return ERROR_VOLUME_MWH_NOT_NUMBER
-    elif volume_mwh <= 0:
-        return ERROR_VOLUME_MWH_NOT_POSITIVE
-    else:
-        return None
 
 
 def internal_error_response(request_id: str | None = None) -> dict[str, Any]:
@@ -107,6 +89,14 @@ def get_request_id(event: dict[str, Any], context: Any) -> str:
     return UNKNOWN_REQUEST_ID
 
 
+def build_internal_trade(request_body: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "trade_id": request_body["trade_id"],
+        "product": request_body["product"],
+        "volume_mwh": request_body["volume_mwh"],
+    }
+
+
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     request_id = None
 
@@ -139,10 +129,10 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             )
             return error_response(volume_mwh_error, request_id)
 
+        internal_trade = build_internal_trade(request_body)
+
         response_body = {
-            "trade_id": request_body["trade_id"],
-            "product": request_body["product"],
-            "volume_mwh": volume_mwh,
+            **internal_trade,
             "status": STATUS_RECEIVED,
         }
 

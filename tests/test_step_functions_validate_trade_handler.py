@@ -1,4 +1,5 @@
-from typing import Any, Mapping
+from collections.abc import Mapping
+from typing import Any
 
 import pytest
 
@@ -7,16 +8,14 @@ from step_functions_validate_trade_handler import (
     ValidationResult,
     step_functions_validate_trade_handler,
 )
-
-from trade_handler import (
-    ERROR_VOLUME_MWH_NOT_NUMBER,
-    ERROR_VOLUME_MWH_NOT_POSITIVE,
-)
-
 from trade_result_persistence import (
     STATUS_ACCEPTED,
     STATUS_REJECTED,
     build_trade_result_document,
+)
+from trade_validation import (
+    ERROR_VOLUME_MWH_NOT_NUMBER,
+    ERROR_VOLUME_MWH_NOT_POSITIVE,
 )
 
 TEST_TRADE_ID = "TRD-1001"

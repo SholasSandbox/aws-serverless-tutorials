@@ -1,13 +1,13 @@
-import pytest
 import json
 from unittest.mock import Mock
 
+import pytest
+
+from trade_persistence_workflow import persist_trade_processing_result
 from trade_result_persistence import (
     STATUS_ACCEPTED,
     STATUS_REJECTED,
 )
-
-from trade_persistence_workflow import persist_trade_processing_result
 
 
 def test_persist_trade_processing_result_persists_accepted_trade_artifact_and_status():

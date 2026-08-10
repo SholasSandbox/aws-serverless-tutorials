@@ -1,5 +1,7 @@
 # Lesson 34B: SQS Retry and Idempotency Implications
 
+Last reviewed: 2026-07-26
+
 ## Objective
 
 Lesson 34B explains why this rule matters:
@@ -17,6 +19,10 @@ SQS record handling
   -> call persist_trade(trade)
   -> if persist_trade(...) raises, return the message ID in batchItemFailures
 ```
+
+This partial-success contract takes effect only when the Lambda event source
+mapping enables `ReportBatchItemFailures`. Without that configuration, the
+returned list does not create selective record retries.
 
 The lesson is not trying to implement real S3 or DynamoDB persistence inside the SQS handler. The lesson is trying to make the retry risk visible before adding real side effects behind `persist_trade(...)`.
 
@@ -325,6 +331,11 @@ Handler can treat duplicate-as-already-processed if that is the intended contrac
 ```
 
 The condition does not stop SQS from retrying. It protects state when retry happens.
+
+This particular `attribute_not_exists(trade_id)` design is a first-write-wins
+gate. It is suitable for one immutable status item per trade, but it would also
+block legitimate later status transitions. A lifecycle model would need a
+versioned condition, a composite key, or a separate event/history item design.
 
 ---
 
@@ -816,3 +827,10 @@ Repeated persistence is safe only when the side effects are idempotent.
 | S3 | Amazon Simple Storage Service |
 | SAP-C02 | AWS Certified Solutions Architect - Professional exam code |
 | SQS | Amazon Simple Queue Service |
+
+## References
+
+- AWS Lambda partial batch responses for SQS:
+  <https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html>
+- Boto3 DynamoDB `PutItem` exceptions:
+  <https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/dynamodb/client/put_item.html>

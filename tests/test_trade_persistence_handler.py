@@ -1,7 +1,7 @@
 from typing import Any
+from unittest.mock import Mock
 
 import pytest
-from unittest.mock import Mock
 
 import trade_persistence_handler as handler_module
 

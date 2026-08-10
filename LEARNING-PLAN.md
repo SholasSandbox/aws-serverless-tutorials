@@ -1,10 +1,26 @@
 # Python and Serverless Learning Plan
 
+Last reviewed: 2026-08-10
+
 ## Objective
 
 Build confident Python and AWS serverless engineering skills through small,
 tested exercises. This is a parallel SAP-C02 learning track and is not the
 Energy Data Lakehouse implementation.
+
+## Programme Priority Gate
+
+During the current SAP-C02 validation period, the separate Energy Data
+Lakehouse SAP-C02 readiness tracker controls programme priority. The learner
+will maintain two full timed mocks per week. Tutorial work must not displace a
+mock, its review, spaced remediation, or the current DR, migration, and cost
+decision work.
+
+An unchecked tutorial item is backlog, not authorization to start it. Local
+implementation may resume only at one of the evidence checkpoints recorded in
+`docs/tutorial-resume-checkpoints.md`, and only when it fits without weakening
+the two-mock cadence. Live AWS work still requires explicit approval for the
+specific lab.
 
 ## Evidence Rule
 
@@ -17,37 +33,65 @@ Each lesson should produce at least one concrete artifact:
 - an IAM action/resource checklist
 - a wrong-assumption or weak-area note
 
-Mark a lesson complete only when its local tests pass and the behavior can be
-explained without relying on the tutorial prompt.
+Completion evidence depends on the lesson type:
+
+- Implementation lesson: the relevant behavior tests must pass.
+- ASL lesson: the state-machine definition and intended transitions must be
+  structurally validated.
+- Conceptual or service-selection lesson: an accuracy-reviewed artifact must
+  state its assumptions, boundaries, trade-offs, and evidence sources.
+
+The full repository test suite is regression evidence. Passing unrelated tests
+does not prove that a conceptual note is correct.
+
+### Evidence levels
+
+| Evidence level | Meaning |
+| --- | --- |
+| Conceptual | Accuracy-reviewed explanation, comparison, checklist, or decision artifact; no executable behavior is implied |
+| Local tested | Executable Python behavior or an ASL contract has relevant passing local tests; AWS responses may still be mocked or structurally checked |
+| Live AWS | The behavior has been deployed, exercised against AWS, and supported by sanitized operational evidence |
+
+A capability may cite more than one level when separate conceptual and local
+artifacts exist. A dash means that the target evidence level has not been
+attained.
 
 ## Current Baseline
 
-| Capability | Status | Evidence |
-| --- | --- | --- |
-| API-style Lambda request parsing and validation | Implemented | `trade_handler.py`, `tests/test_trade_handler.py` |
-| Correlation IDs and structured logging concepts | Implemented | API, EventBridge, and SQS handlers |
-| EventBridge event handling | Implemented | `eventbridge_trade_handler.py`, corresponding tests |
-| SQS record handling and partial batch responses | Implemented | `sqs_trade_handler.py`, corresponding tests |
-| Step Functions task validation | Implemented | handler, ASL examples, and tests |
-| Accepted/rejected S3 result artifacts | Implemented | `trade_result_persistence.py`, corresponding tests |
-| DynamoDB status records | Implemented | Conditional `attribute_not_exists(trade_id)` writes and duplicate-as-idempotent-success tests in `trade_status_persistence.py` |
-| Combined S3 and DynamoDB persistence | Implemented | Deterministic S3 keys and repeatable compact workflow responses in workflow/handler modules and tests |
-| Repository documentation and governance | Implemented | `README.md`, `AGENTS.md`, this plan |
-| Test baseline | Verified | 218 tests passed on 2026-07-03 with `python3 -m pytest -q` |
-| Intentional Git baseline | Implemented | Repository initialised; `.gitignore` covers `.venv`, caches, bytecode, `.DS_Store`, and `archive/` |
-| Consolidation review | Implemented | Import order, formatting, trailing whitespace, dead comments, stale README note, and empty archive file resolved in Lesson 27 |
-| Persistence handler boundary hardening | Implemented | `trade_persistence_handler.py` rewritten to production shape; boundary and edge-case tests added in Lesson 28 |
-| Ruff formatting baseline | Implemented | `ruff` added to `pyproject.toml`; consistent style applied across all 20 tutorial files |
-| Persistence failure-ordering reasoning | Implemented | Lesson 29 note plus workflow tests showing S3 can succeed before DynamoDB fails and retry reuses the same S3 key |
-| Persistence IAM boundary | Implemented | Lesson 30 checklist scopes S3, DynamoDB, CloudWatch Logs, and Step Functions role responsibilities for the persistence path |
-| Retry-safe persistence and reconciliation | Implemented | Lesson 31 decision note records retry, catch, reconciliation, and no-default-delete compensation guidance |
-| S3 key design and encryption assumptions | Implemented | Lesson 32 note documents accepted/rejected prefixes, deterministic keys, overwrite behavior, and bucket-level encryption assumptions |
-| Step Functions timeout and terminal failure | Implemented | Lesson 33 ASL definition and tests cover timeout, bounded retry, catch, reconciliation routing, and explicit terminal failure |
-| SQS poison-message and DLQ mental model | Implemented | Lesson 34A note explains poison messages, visibility timeout, maxReceiveCount, DLQ ownership, idempotency, and SQS versus Step Functions failure scope |
-| SQS retry and replay decision reasoning | Implemented | Lessons 34B and 34C document idempotent side effects, partial-success risk, DLQ triage, and replay safety boundaries |
-| EventBridge vs SQS vs direct Step Functions selection | Implemented | Lesson 35 decision note compares fact publication, queued work, and direct workflow orchestration |
+| Capability | Completion status | Evidence level | Evidence |
+| --- | --- | --- | --- |
+| API-style Lambda request parsing and validation | Completed | Local tested | `trade_handler.py`, `tests/test_trade_handler.py` |
+| Correlation IDs and logging context | Partial | Local tested | API, EventBridge, and SQS handlers carry correlation context; repository-wide structured logging consistency remains open |
+| EventBridge event handling | Completed | Local tested | `eventbridge_trade_handler.py`, corresponding tests |
+| SQS record handling and partial batch responses | Completed | Local tested | `sqs_trade_handler.py`, corresponding tests; live event-source mapping configuration is not proved |
+| Step Functions task validation | Completed | Local tested | Handler tests and structurally checked ASL examples; no tutorial workflow has run in AWS |
+| Accepted/rejected S3 result artifacts | Completed | Local tested | `trade_result_persistence.py`, corresponding mocked `PutObject` tests |
+| DynamoDB status records | Partial | Local tested | Conditional `attribute_not_exists(trade_id)` helper and injected duplicate-exception tests exist, but the real workflow does not yet wire the generated conditional-check exception into duplicate-as-success handling |
+| Combined S3 and DynamoDB persistence | Partial | Local tested | Deterministic S3 keys and compact workflow responses are tested; real conditional-duplicate handling and live AWS behavior remain unproved |
+| boto3 service boundary | Partial | Local tested | S3 client and DynamoDB resource construction, mocked `PutObject`, conditional `PutItem`, and dependency injection are tested; SDK configuration, realistic `ClientError` classification, and live calls remain open |
+| Repository documentation and governance | Completed | Conceptual | `README.md`, `AGENTS.md`, this plan |
+| Test baseline | Verified | Local tested | 234 tests passed on 2026-08-10 with `.venv/bin/python -m pytest -q` |
+| Intentional Git baseline | Completed | Local tested | Repository initialised; `.gitignore` covers `.venv`, caches, bytecode, `.DS_Store`, and `archive/` |
+| Consolidation review | Completed | Local tested | Import order, formatting, trailing whitespace, dead comments, stale README note, and empty archive file resolved in Lesson 27 |
+| Persistence handler boundary hardening | Completed | Local tested | `trade_persistence_handler.py` boundary validation and edge-case tests added in Lesson 28 |
+| Ruff formatting baseline | Completed | Local tested | `ruff` added to `pyproject.toml`; consistent style applied across all 20 tutorial files |
+| Persistence failure-ordering reasoning | Completed | Conceptual + Local tested | Lesson 29 note plus workflow tests show S3 can succeed before DynamoDB fails and a retry reuses the same S3 key |
+| Persistence IAM boundary | Completed | Conceptual | Lesson 30 checklist scopes S3, DynamoDB, CloudWatch Logs, and Step Functions roles; no tutorial IAM role has been deployed |
+| Retry-safe persistence and reconciliation | Completed | Conceptual | Lesson 31 records retry, catch, reconciliation, and no-default-delete guidance |
+| S3 key design and encryption assumptions | Completed | Conceptual | Lesson 32 documents prefixes, deterministic keys, versioning implications, and encryption assumptions |
+| Step Functions timeout and terminal failure | Completed | Local tested | Lesson 33 ASL definition is structurally tested; no live execution is claimed |
+| SQS poison-message and DLQ mental model | Completed | Conceptual + Local tested | Lesson 34A explains the model and connects it to existing mixed-batch handler tests |
+| SQS retry and replay decision reasoning | Completed | Conceptual | Lessons 34B and 34C document idempotent side effects, partial-success risk, DLQ triage, and replay boundaries |
+| EventBridge vs SQS vs direct Step Functions selection | Completed | Conceptual | Lesson 35 decision note compares fact publication, queued work, and orchestration |
+| Serverless entry-point selection | Completed | Conceptual | Lesson 36 compares API Gateway, EventBridge, SQS, and direct Step Functions invocation |
+| API-facing vs internal Lambda boundaries | Completed | Conceptual | Lesson 37 separates HTTP translation, internal contracts, retry ownership, identity context, and least privilege |
+| API-to-Step Functions handoff adapter | Partial | Local tested | `api_workflow_handoff.py` and focused mocked tests validate the local Lambda-mediated pattern; the post-attempt architecture decision and all live evidence remain open |
+| Live tutorial AWS integration | Not started | — | No tutorial resources have been deployed or exercised in AWS |
 
-## Active Sequence
+## Tutorial Backlog and Resume Sequence
+
+Nothing in this section is active merely because it is unchecked. Resume order
+and evidence gates are controlled by `docs/tutorial-resume-checkpoints.md`.
 
 ### 1. Consolidate the existing lessons
 
@@ -61,14 +105,17 @@ explained without relying on the tutorial prompt.
 
 ### 2. Strengthen Python production shape
 
-- [ ] Introduce typed event/result helpers only where they reduce repeated
-  validation logic.
+- [x] Introduce typed validation helpers where they reduce repetition in the
+  persistence boundary; do not generalize them without a demonstrated need.
 - [ ] Standardize error constants and stable response contracts.
-- [ ] Replace log-message interpolation patterns with consistent structured
-  context.
-- [ ] Add tests for unexpected exceptions and malformed nested event shapes.
-- [ ] Explain module boundaries, dependency injection, and pure versus impure
-  functions in a short note.
+- [ ] Standardize machine-queryable structured log fields where a demonstrated
+  operational need justifies them; parameterized `%s` logging is not itself an
+  error.
+- [x] Add unexpected dependency-failure and malformed nested-event tests for
+  the persistence path; reopen repository-wide work only for a demonstrated
+  gap.
+- [x] Explain module boundaries, dependency injection, and pure validation
+  boundaries in Lessons 28 and 37; a separate generic note is not required.
 
 ### 3. Deepen serverless behavior
 
@@ -85,8 +132,9 @@ explained without relying on the tutorial prompt.
 ### 4. Deepen persistence and IAM reasoning
 
 - [x] Add conditional or idempotent DynamoDB write examples. Lesson 26 uses
-  `ConditionExpression="attribute_not_exists(trade_id)"` and treats the
-  expected duplicate failure as idempotent success.
+  `ConditionExpression="attribute_not_exists(trade_id)"`; the helper can treat
+  an injected expected duplicate failure as idempotent success, while the real
+  workflow wiring remains a recorded limitation.
 - [x] Document S3 key design, partitioning, overwrite behavior, and encryption
   assumptions.
 - [x] Create a least-privilege IAM action/resource checklist for the
@@ -95,14 +143,54 @@ explained without relying on the tutorial prompt.
 - [x] Document when orchestration should compensate, retry, or surface manual
   reconciliation.
 
-### 5. Optional controlled AWS lab
+### 5. Resume checkpoints and optional controlled AWS lab
 
+- [x] Record the local implementation and post-exam checkpoints in
+  `docs/tutorial-resume-checkpoints.md`.
 - [ ] Define cost, IAM, cleanup, and success criteria before deployment.
 - [ ] Deploy only after explicit user approval.
 - [ ] Capture sanitized evidence and tear down resources after the lesson.
 - [ ] Do not connect the lab to the Energy Data Lakehouse automatically.
 
+## Known Current Implementation Limitations
+
+- `persist_trade_status_record` can treat a supplied conditional-check
+  exception as duplicate success, but `persist_trade_processing_result` does
+  not currently supply DynamoDB's generated exception class. The real workflow
+  therefore propagates that conditional failure instead of proving end-to-end
+  duplicate-as-success behavior.
+- `build_persistence_dependencies` creates the S3 client and DynamoDB resource
+  on every current handler invocation. A later local slice should evaluate a
+  reusable or lazily cached client factory while preserving dependency
+  injection and import-safe tests.
+- No tutorial IAM role, API route, Lambda, state machine, log group, metric, or
+  alarm has been deployed or verified in AWS.
+- `api_workflow_handoff.py` is a local teaching adapter, not the selected
+  architecture for a deployed vertical slice. The direct-integration versus
+  Lambda-mediated decision remains at Checkpoint C.
+- These limitations are recorded backlog. This planning update does not
+  authorize code changes or AWS deployment.
+
 ## Completed Lesson Evidence
+
+### Lesson 25: Persistence task contract and S3 result artifacts
+
+Status: **Completed locally in June 2026**.
+
+Evidence:
+
+- `step-functions/persistence-task-state.json` and
+  `persistence-task-state-with-retry-catch.json` define the Step Functions
+  persistence-task contract and bounded Retry/Catch path;
+- `docs/lessons/lesson-25-s3-result-artifacts.md` documents the S3 artifact
+  envelope, deterministic key, and dependency-injected write boundary;
+- the two artifacts are complementary parts of the same persistence lesson,
+  not two different Lesson 25 identities;
+- no AWS resources were deployed.
+
+SAP-C02 mapping: Domain 2 persistence and resilience and Domain 3 operational
+improvement. This is tutorial evidence only, not Energy Data Lakehouse
+implementation.
 
 ### Lesson 26: Idempotency and duplicate persistence protection
 
@@ -112,7 +200,8 @@ Evidence:
 
 - conditional DynamoDB write protection using
   `ConditionExpression="attribute_not_exists(trade_id)"`;
-- duplicate conditional-check failure returns idempotent success;
+- the helper returns idempotent success when its test injects the expected
+  duplicate conditional-check exception;
 - unexpected DynamoDB errors remain visible;
 - deterministic S3 keys are verified through `build_s3_key`;
 - repeated successful workflow execution returns the same compact persistence
@@ -359,6 +448,43 @@ Evidence:
 SAP-C02 mapping: Domain 2 integration and new-solution design, Domain 3
 operational reasoning, and Domain 1 boundary clarity. This is tutorial evidence
 only, not Energy Data Lakehouse implementation.
+
+### Lesson 36: Choosing the right serverless entry point
+
+Status: **Completed locally on 2026-07-23**.
+
+Evidence:
+
+- `docs/lessons/lesson-36-choosing-the-right-serverless-entry-point.md`
+  compares API Gateway, EventBridge, SQS, and direct Step Functions invocation;
+- the decision model distinguishes HTTP requests, business facts, durable work,
+  and known workflows;
+- asynchronous response semantics now state that `202 Accepted` is valid only
+  after the internal handoff itself succeeds;
+- no AWS resources were deployed and no code behaviour changed.
+
+SAP-C02 mapping: Domain 2 integration and new-solution design, Domain 3
+operational reasoning, and Domain 1 external/internal boundary design. This is
+tutorial evidence only, not Energy Data Lakehouse implementation.
+
+### Lesson 37: API-facing Lambda versus internal service Lambda
+
+Status: **Completed locally on 2026-07-23; accuracy-reviewed 2026-07-26**.
+
+Evidence:
+
+- `docs/lessons/lesson-37-api-facing-lambda-vs-internal-service-lambda.md`
+  separates HTTP proxy contracts from normalized internal task contracts;
+- the note distinguishes boundary validation, domain validation, retry owners,
+  identity context, correlation identifiers, and dependency ownership;
+- the accuracy review records API Gateway base64-body handling and the Lambda
+  execution-role permissions required for an SQS event source mapping;
+- no AWS resources were deployed and no code behaviour changed;
+- the full local suite still passes: 218 tests on 2026-07-26.
+
+SAP-C02 mapping: Domain 1 security and responsibility boundaries, Domain 2
+serverless design, and Domain 3 operational improvement. This is tutorial
+evidence only, not Energy Data Lakehouse implementation.
 
 ## Parked Topics
 

@@ -1,5 +1,7 @@
 # Lesson 34A: SQS Poison Message and DLQ Mental Model
 
+Last reviewed: 2026-07-26
+
 ## Purpose
 
 This lesson explains the SQS poison-message and dead-letter queue mental model
@@ -93,6 +95,10 @@ When partial batch response is enabled with `ReportBatchItemFailures`, the
 function can return only the failed message IDs. Lambda then treats the records
 not listed in `batchItemFailures` as successfully processed, while the failed
 records can become visible again for retry.
+
+Returning this shape from code is not sufficient by itself. The event source
+mapping must include `ReportBatchItemFailures` in `FunctionResponseTypes`; if
+it does not, Lambda uses whole-batch failure semantics instead.
 
 For this tutorial, the practical contract is:
 
@@ -337,6 +343,9 @@ evidence.
 
 ## References
 
-- AWS Lambda Developer Guide: Handling errors for an SQS event source in Lambda.
-- Amazon SQS Developer Guide: Using dead-letter queues in Amazon SQS.
-- Amazon SQS Developer Guide: Amazon SQS visibility timeout.
+- AWS Lambda SQS error handling and partial batch responses:
+  <https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-errorhandling.html>
+- AWS Lambda SQS event source configuration:
+  <https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-configure.html>
+- Amazon SQS dead-letter queues:
+  <https://docs.aws.amazon.com/AWSSimpleQueueService/latest/SQSDeveloperGuide/sqs-dead-letter-queues.html>

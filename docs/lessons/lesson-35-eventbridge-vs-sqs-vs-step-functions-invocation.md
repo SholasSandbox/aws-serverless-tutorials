@@ -1,5 +1,7 @@
 # Lesson 35: EventBridge vs SQS vs Direct Step Functions Invocation
 
+Last reviewed: 2026-07-26
+
 ## Objective
 
 This lesson explains when to use:
@@ -404,7 +406,7 @@ does not give this step-by-step process model.
 | Failure area | EventBridge | SQS | Direct Step Functions |
 | --- | --- | --- | --- |
 | Target unavailable | EventBridge retry/DLQ for event target delivery | Message remains available for retry after visibility timeout | Task-level Retry/Catch |
-| Consumer code raises | Target-specific failure handling | Message can retry and eventually DLQ | State can retry/catch/fail |
+| Consumer code raises | Depends on target invocation. For an asynchronous Lambda target, EventBridge delivery can already be complete while Lambda owns function-error retries and destinations. | Message can retry and eventually DLQ | State can retry/catch/fail |
 | Partial batch handling | Not the core model | Core SQS/Lambda concern | Not the model |
 | Poison message | Not primary | Core DLQ concept | Bad workflow input or task failure |
 | Operational evidence | Event delivery metrics/logs | Queue depth, DLQ depth, receive count, Lambda logs | Execution history and state transitions |
@@ -422,6 +424,12 @@ trade.received event published
 ```
 
 The failure is event delivery to a target.
+
+For a Lambda rule target, EventBridge invokes Lambda asynchronously. Once
+Lambda accepts the event into its asynchronous queue, later function-code or
+runtime failure belongs to Lambda's asynchronous retry/destination model, not
+the EventBridge target-delivery DLQ. Keep those two failure boundaries
+separate.
 
 #### SQS failure
 
@@ -865,3 +873,12 @@ What operational evidence will we need when it fails?
 | SAP-C02 | AWS Certified Solutions Architect - Professional exam code |
 | SDK | Software Development Kit |
 | SQS | Amazon Simple Queue Service |
+
+## References
+
+- EventBridge target retry policy:
+  <https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-rule-retry-policy.html>
+- EventBridge target types, including asynchronous Lambda targets:
+  <https://docs.aws.amazon.com/eventbridge/latest/userguide/eb-targets.html>
+- Lambda asynchronous error handling:
+  <https://docs.aws.amazon.com/lambda/latest/dg/invocation-async-error-handling.html>

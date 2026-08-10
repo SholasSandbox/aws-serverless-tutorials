@@ -6,7 +6,6 @@ from trade_result_persistence import (
     build_s3_key,
     put_json_object_to_s3,
 )
-
 from trade_status_persistence import (
     RESULT_TYPE_ACCEPTED,
     RESULT_TYPE_REJECTED,

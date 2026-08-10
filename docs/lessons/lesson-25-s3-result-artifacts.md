@@ -1,5 +1,7 @@
 # Lesson 25: S3 Trade Result Artifacts
 
+Last reviewed: 2026-07-26
+
 ## Purpose
 
 This note records what Lesson 25 established about building and writing S3
@@ -67,8 +69,9 @@ trade-results/accepted/year=2026/month=06/day=02/trade_id=TRD-001.json
 ```
 
 The Hive-style partition segments (`year=`, `month=`, `day=`) make the prefix
-compatible with AWS Athena partition projection and S3 inventory analysis
-without additional tooling.
+compatible with Athena partition discovery and partition projection. S3
+Inventory lists object keys regardless of their layout; this convention merely
+makes those keys easier to group and analyse.
 
 ### Why the key is deterministic
 
@@ -89,7 +92,10 @@ execution writes to the same key, not a new one. This property is proved in
 it in the key. This function replaces any character that is not alphanumeric,
 `.`, `_`, `=`, or `-` with a hyphen, and truncates to 120 characters.
 
-This prevents S3 key injection from unexpected `trade_id` values.
+This keeps a business identifier inside the intended key component and avoids
+accidental path delimiters, control characters, or awkward key names. S3 has a
+flat object-key namespace, so this sanitisation is a naming and contract
+control—not a substitute for IAM or bucket-policy authorization.
 
 Test:
 
@@ -148,6 +154,11 @@ tutorial.
 | `test_build_s3_key_sanitises_trade_id` | Unsafe characters replaced in key |
 | `test_put_json_object_to_s3_calls_put_object_with_expected_arguments` | Correct boto3 call shape |
 | `test_s3_result_key_is_deterministic_for_same_trade_result` | Same inputs always produce the same key |
+
+A deterministic key prevents duplicate *key names*, but it does not guarantee
+one stored physical version. If S3 Versioning is enabled, another `PutObject`
+to the same key creates a new object version. Lesson 32 covers that retry and
+cost consequence.
 
 ## What this module does not own
 

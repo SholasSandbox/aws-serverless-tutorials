@@ -5,6 +5,8 @@ Related notes:
 
 # Lesson 32: S3 Key Design, Partitioning, Overwrite Behaviour, and Encryption Assumptions
 
+Last reviewed: 2026-07-26
+
 ## Purpose
 
 This note explains the S3 object-key design used by the current persistence
@@ -181,6 +183,11 @@ same input
 If the artifact body changes between retries, overwriting becomes risky because
 S3 no longer represents a stable persistence artifact.
 
+If S3 Versioning is enabled, a repeated `PutObject` to the same deterministic
+key creates a new version rather than replacing the prior bytes in place. The
+current key still converges on one logical name, but storage, lifecycle, audit,
+and reconciliation must account for noncurrent versions.
+
 ## Decision table
 
 | Design choice | Retry consequence | Recommendation |
@@ -226,8 +233,10 @@ writes outside the accepted/rejected prefixes.
 
 ## Encryption assumptions
 
-For this tutorial, assume S3 server-side encryption is handled by the bucket's
-default encryption configuration.
+All new S3 object uploads receive server-side encryption automatically, with
+SSE-S3 as the base default when no different encryption mode is selected. For
+this tutorial, also assume that the bucket's explicit default-encryption
+configuration is the deployment control that selects the intended mode.
 
 Current tutorial assumption:
 
@@ -237,7 +246,9 @@ No KMS permissions are added to the Lambda role by default.
 ```
 
 This keeps the handler focused on persistence behaviour rather than bucket
-configuration.
+configuration. Before deployment, verify whether the bucket stays on SSE-S3
+or deliberately uses SSE-KMS or DSSE-KMS; automatic SSE-S3 does not satisfy a
+requirement for a particular KMS key or cross-account key policy.
 
 ### When AWS-managed encryption is enough for this tutorial
 
@@ -333,6 +344,7 @@ content, explicit DynamoDB idempotency rules, and Step Functions failure routing
 | ACL | Access Control List |
 | ARN | Amazon Resource Name |
 | AWS | Amazon Web Services |
+| DSSE-KMS | Dual-layer Server-Side Encryption with AWS Key Management Service keys |
 | IAM | Identity and Access Management |
 | JSON | JavaScript Object Notation |
 | KMS | Key Management Service |
@@ -341,3 +353,10 @@ content, explicit DynamoDB idempotency rules, and Step Functions failure routing
 | SAP-C02 | AWS Certified Solutions Architect - Professional exam |
 | SSE-KMS | Server-Side Encryption with AWS Key Management Service keys |
 | SSE-S3 | Server-Side Encryption with Amazon S3 managed keys |
+
+## References
+
+- AWS S3 default encryption FAQ:
+  <https://docs.aws.amazon.com/AmazonS3/latest/userguide/default-encryption-faq.html>
+- AWS S3 Versioning behaviour:
+  <https://docs.aws.amazon.com/AmazonS3/latest/userguide/versioning-workflows.html>

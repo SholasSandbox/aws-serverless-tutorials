@@ -1,5 +1,7 @@
 # Learning Summary
 
+Last reviewed: 2026-08-10
+
 ---
 
 ### Lessons 1-24: Foundation recap from repository evidence
@@ -109,15 +111,22 @@ Lakehouse implementation evidence.
 
 ---
 
-### Lesson 25: Step Functions Retry/Catch for persistence task failure
+### Lesson 25: Persistence task contract and S3 result artifacts
 
-Completed local-first Step Functions Retry/Catch contract for the persistence Lambda task.
+Lesson 25 contains two complementary persistence artifacts: the local-first
+Step Functions task/Retry/Catch contract and the focused S3 result-artifact
+design note. Later documentation had described these as if they were different
+Lesson 25 identities; this entry now reconciles them.
 
 **Evidence:**
 
 - Added `step-functions/persistence-task-state-with-retry-catch.json`
 - Added `tests/test_step_functions_persistence_retry_catch_contract.py`
-- Verified transient Lambda and timeout errors are retried
+- Added `docs/lessons/lesson-25-s3-result-artifacts.md`
+- Documented accepted/rejected artifact envelopes, deterministic key design,
+  and the dependency-injected S3 write boundary
+- Verified the named transient Lambda invocation errors and task-level
+  `States.Timeout` are retried
 - Verified retry behavior uses bounded backoff
 - Verified caught failures are stored under `$.persistence_error`
 - Verified failures route to `PersistenceFailed`
@@ -173,10 +182,10 @@ Completed a focused consolidation pass across the tutorial workspace.
 - Updated `README.md` to reflect the repository's intentional Git baseline.
 - Full local suite passed: 168 tests passed.
 
-**Weak area noted:**
+**Historical note:**
 
-- `lesson_1a_lambda_response.py` remains an incomplete early-lesson artifact
-  and would fail if executed directly.
+- `lesson_1a_lambda_response.py` is now an archived scaffold that re-exports
+  the completed Lesson 1 handler and runs safely with an explanatory message.
 
 This is Python/serverless tutorial evidence mapped to SAP-C02 Domain 3
 operational excellence. It is not Energy Data Lakehouse implementation
@@ -323,3 +332,111 @@ reconciliation routing, and explicit terminal failure.
 This is Python/serverless tutorial evidence mapped to SAP-C02 Domain 2
 resilience, Domain 3 continuous improvement, and Domain 1 role-boundary
 reasoning. It is not Energy Data Lakehouse implementation evidence.
+
+---
+
+### Lessons 34A-34C: SQS failure, idempotency, and DLQ recovery
+
+Completed a documentation-led SQS failure-handling sequence covering poison
+messages, partial batch responses, retry-safe side effects, and controlled DLQ
+redrive.
+
+**Evidence:**
+
+- `docs/lessons/lesson-34a-sqs-poison-message-and-dlq-mental-model.md`
+- `docs/lessons/lesson-34b-sqs-retry-and-idempotency-implications.md`
+- `docs/lessons/lesson-34c-sqs-dlq-operational-handling-and-replay-decision-model.md`
+- `tests/test_sqs_trade_handler.py` verifies mixed-batch retry signalling;
+- the 2026-07-26 accuracy review confirms that selective retry requires
+  `ReportBatchItemFailures`, first-write DynamoDB conditions are not a general
+  status-transition model, and DLQ redrive assigns a new message ID and enqueue
+  time while leaving the body unchanged;
+- full local suite passed: 218 tests on 2026-07-26.
+
+SAP-C02 mapping: Domain 2 resilience and decoupling, Domain 3 operational
+recovery, and Domain 1 IAM boundary reasoning. This is tutorial evidence only,
+not Energy Data Lakehouse implementation.
+
+---
+
+### Lesson 35: EventBridge, SQS, and Step Functions invocation
+
+Completed a service-selection decision note for fact publication, durable work,
+and explicit workflow orchestration.
+
+**Evidence:**
+
+- `docs/lessons/lesson-35-eventbridge-vs-sqs-vs-step-functions-invocation.md`;
+- the 2026-07-26 accuracy review separates EventBridge target-delivery failure
+  from later function-code failure in an asynchronously invoked Lambda target;
+- no AWS resources were deployed and no code behaviour changed.
+
+SAP-C02 mapping: Domain 2 integration and solution design and Domain 3 failure
+model reasoning. This is tutorial evidence only, not Energy Data Lakehouse
+implementation.
+
+---
+
+### Lesson 36: Choosing the right serverless entry point
+
+Completed a decision model for API Gateway, EventBridge, SQS, and direct Step
+Functions invocation based on the caller's contract and intended outcome.
+
+**Evidence:**
+
+- `docs/lessons/lesson-36-choosing-the-right-serverless-entry-point.md`;
+- the note distinguishes HTTP response, business-event, work-queue, and
+  workflow-start contracts;
+- the 2026-07-26 review clarifies that `202 Accepted` follows a successful
+  asynchronous handoff rather than merely an intention to enqueue work.
+
+SAP-C02 mapping: Domain 2 integration and new-solution design and Domain 1
+external/internal boundary reasoning. This is tutorial evidence only, not
+Energy Data Lakehouse implementation.
+
+---
+
+### Lesson 37: API-facing Lambda versus internal service Lambda
+
+Completed a responsibility-boundary note separating HTTP translation from
+internal domain and workflow tasks.
+
+**Evidence:**
+
+- `docs/lessons/lesson-37-api-facing-lambda-vs-internal-service-lambda.md`;
+- the note covers transport versus domain validation, response and failure
+  contracts, correlation, identity context, dependency ownership, and least
+  privilege;
+- the 2026-07-26 review adds base64-body handling and corrects the SQS event
+  source permission model: the Lambda execution role needs queue-read/delete
+  permissions because the mapping does not grant them by itself;
+- full local suite passed: 218 tests on 2026-07-26.
+
+SAP-C02 mapping: Domain 1 security boundaries, Domain 2 serverless design, and
+Domain 3 operational improvement. This is tutorial evidence only, not Energy
+Data Lakehouse implementation.
+
+---
+
+### API-to-Step Functions local handoff adapter
+
+Added a bounded, local-only API-facing adapter without selecting or deploying
+the eventual API integration architecture.
+
+**Evidence:**
+
+- `api_workflow_handoff.py` converts an API Gateway-style request into a
+  normalized trade workflow input and calls an injected Step Functions client;
+- required trade fields, numeric volume, JSON-object bodies, base64 bodies,
+  idempotency headers, and transport-field filtering are locally tested;
+- successful starts return a truthful `202`, while duplicate, retryable,
+  permission, configuration, and unexpected failures use client-safe mappings;
+- the shared validation helpers now live in `trade_validation.py` rather than
+  being owned by one handler module;
+- Ruff check, Ruff format check, and the full local suite pass: 234 tests on
+  2026-08-10;
+- no AWS resources were deployed or called.
+
+This is local tutorial evidence only. The Checkpoint C architecture decision
+between API Gateway direct integration and a Lambda-mediated handoff remains
+open, and the separate Lesson 38 design document remains pending review.
