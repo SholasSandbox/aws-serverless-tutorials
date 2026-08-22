@@ -1,12 +1,19 @@
+<!-- markdownlint-disable MD012 MD013 MD024 MD060 -->
+
 # Lesson 37: API-Facing Lambda vs Internal Service Lambda
+
+Last reviewed: 2026-07-27
 
 ## Objective
 
-This lesson answers:
+This lesson answers two questions:
 
 ```text
 Once the entry point has been chosen,
-what responsibility belongs in the first Lambda?
+is a Lambda required at the HTTP boundary?
+
+If Lambda is required,
+what responsibility belongs in that function?
 ```
 
 Lesson 36 selected the system entry point:
@@ -35,14 +42,22 @@ and what contract should it return?
 The key distinction is:
 
 ```text
+Direct API Gateway service integration:
+  map the HTTP request to an AWS service when custom code is unnecessary
+
 API-facing Lambda:
-  translate between HTTP and the internal system
+  translate between HTTP and the internal system when code is required
 
 Internal service Lambda:
   perform one bounded domain or workflow task
 ```
 
-Both are AWS Lambda functions. The difference is not the runtime. The difference is the **contract and responsibility**.
+The two Lambda categories use the same runtime. Their difference is the
+**contract and responsibility**. A direct integration is a separate design
+option and contains no boundary Lambda.
+
+This is a design-decision lesson with **Conceptual** evidence. It does not
+select the eventual API-to-workflow implementation pattern.
 
 ---
 
@@ -53,7 +68,8 @@ Lesson 36 established that these services can occupy different positions within 
 ```text
 External client
   → API Gateway
-  → API-facing Lambda
+  → direct Step Functions integration
+     or API-facing Lambda when custom code is required
   → Step Functions
   → internal service Lambdas
   → S3 / DynamoDB
@@ -64,7 +80,8 @@ Each component solves a different problem:
 | Component | Primary responsibility |
 |---|---|
 | API Gateway | Expose and govern an HTTP endpoint |
-| API-facing Lambda | Translate the external HTTP request |
+| Direct AWS service integration | Map a simple HTTP request to an AWS service operation using configuration and IAM |
+| API-facing Lambda | Translate the external HTTP request when custom code is required |
 | Step Functions | Coordinate the workflow |
 | Internal service Lambda | Execute one workflow or domain task |
 | S3 / DynamoDB | Persist artifacts and state |
@@ -79,18 +96,25 @@ API-facing Lambda
 internal domain contract
 ```
 
-The API-facing Lambda prevents HTTP-specific details from spreading through the rest of the system.
+Either API Gateway mapping or an API-facing Lambda should prevent HTTP-specific
+details from spreading through the rest of the system. The Lambda is justified
+only when configuration alone cannot provide the required boundary behaviour.
 
 ---
 
 ## Short decision rule
 
 ```text
-API Lambda:
-  adapt the boundary
+Can API Gateway mapping and IAM express the boundary safely?
 
-Service Lambda:
-  execute the capability
+Yes:
+  use a direct AWS service integration
+
+No, custom code is required:
+  use an API-facing Lambda to adapt the boundary
+
+Internal service Lambda:
+  execute the bounded capability
 ```
 
 A second useful version is:
@@ -117,6 +141,42 @@ This distinction determines:
 - test design.
 
 ---
+
+
+## First question: is an API-facing Lambda required?
+
+Do not begin with the assumption that every API Gateway route needs Lambda.
+API Gateway can call supported AWS service operations directly, including SQS
+`SendMessage`, EventBridge `PutEvents`, and Step Functions `StartExecution`.
+
+Use a direct integration when:
+
+- request mapping is simple and explicit;
+- authentication and authorisation are handled at API Gateway;
+- a configured IAM role can be scoped to the intended resource;
+- no substantial Python validation or identity translation is required;
+- the required public response can be produced through integration response
+  mapping; and
+- removing Lambda reduces cost and operational complexity without weakening the
+  contract.
+
+Use an API-facing Lambda when the boundary genuinely requires code, such as:
+
+- non-trivial schema or cross-field validation;
+- complex request normalisation;
+- business idempotency decisions;
+- execution-name calculation;
+- dynamic routing across services or workflows;
+- deliberate identity-context translation; or
+- custom response and failure mapping that configuration cannot express
+  clearly.
+
+The rule is:
+
+```text
+Do not add Lambda because it is familiar.
+Add Lambda when boundary code is required.
+```
 
 ## API-facing Lambda mental model
 
@@ -250,6 +310,9 @@ The Lambda must parse it:
 trade_request = json.loads(event["body"])
 ```
 
+If `isBase64Encoded` is `true`, the handler must base64-decode the body before
+JSON parsing. The example event explicitly sets it to `false`.
+
 After parsing, `trade_request` becomes a Python dictionary:
 
 ```python
@@ -274,7 +337,9 @@ Internal Lambda input:
 
 ## Proposed API-facing handler shape
 
-The following is a **proposed example**, not a claim about an existing repository function.
+The following is a **proposed Lambda-mediated example**, not a claim about an
+existing repository function or a decision that the eventual API boundary must
+use Lambda.
 
 ```python
 import json
@@ -686,6 +751,11 @@ The response means:
 ```text
 The system accepted responsibility for processing.
 ```
+
+For a direct API Gateway service integration, the integration response must map
+the successful `SendMessage` or `StartExecution` response to this public `202`
+contract. The underlying AWS API response code is not automatically the public
+API contract.
 
 It does not mean:
 
@@ -1209,7 +1279,7 @@ internal_input = {
 execution = start_workflow(internal_input)
 ```
 
-The API-facing Lambda returns:
+When the Lambda-mediated option is selected, the API-facing Lambda returns:
 
 ```python
 {
@@ -1238,7 +1308,7 @@ The API Lambda should not reimplement the workflow in Python.
 
 ---
 
-## When API Gateway can start Step Functions directly
+## Architecture decision: direct integration or Lambda-mediated handoff
 
 An important architecture challenge is:
 
@@ -1246,7 +1316,9 @@ An important architecture challenge is:
 Do we need the API-facing Lambda at all?
 ```
 
-API Gateway can integrate directly with some AWS services, including Step Functions.
+API Gateway REST APIs and HTTP APIs can integrate directly with Step Functions
+`StartExecution`. HTTP APIs also expose first-class AWS service integration
+subtypes for operations such as SQS `SendMessage` and EventBridge `PutEvents`.
 
 A direct integration may be appropriate when:
 
@@ -1456,7 +1528,60 @@ Example structured context:
 
 ---
 
+## Correlation ID, business idempotency key, and execution name
+
+These three identifiers solve different problems and must not be treated as
+interchangeable.
+
+| Identifier | Primary purpose | Typical ownership |
+|---|---|---|
+| `correlation_id` | Trace one logical operation across API Gateway, Lambda, Step Functions, queues, logs and persistence | Boundary or tracing policy |
+| `idempotency_key` | Identify repeated attempts at the same business operation so duplicate submissions can be handled safely | Public or domain contract |
+| Step Functions execution name | Identify one workflow execution and satisfy Step Functions naming and uniqueness rules | Orchestration adapter or direct integration mapping |
+
+A correlation ID is not proof that two requests are the same business command.
+A fresh client retry might reuse or replace it depending on the tracing policy.
+
+A business idempotency key should be stable for retries of the same intended
+operation and different for a legitimate new operation, correction or version.
+
+For Standard Workflows, `StartExecution` has narrow idempotency semantics:
+
+- the same execution name and the same input return the original response only
+  while that execution is still running;
+- the same name with different input, or the same name after the earlier
+  execution has closed, produces `ExecutionAlreadyExists`;
+- an execution name can normally be reused 90 days after the previous
+  execution closes; and
+- Express `StartExecution` is not idempotent.
+
+Therefore, this is usually weak:
+
+```text
+execution_name = correlation_id
+```
+
+and this may also be too restrictive:
+
+```text
+execution_name = trade_id
+```
+
+The eventual design must define legitimate resubmission, corrected trades,
+workflow versions and the 90-day reuse window. Lesson 37 records the distinction
+but deliberately does not choose the final contract.
+
 ## Authentication and authorization boundaries
+
+### Direct API Gateway service integration
+
+API Gateway uses an integration role to call the selected AWS service action.
+For a direct Step Functions handoff, that role should be limited to
+`states:StartExecution` on the intended state machine.
+
+Caller identity is not automatically transformed into the workflow's business
+identity context. Map only the claims or identifiers the workflow needs, and do
+not pass raw bearer tokens into a long-running execution.
 
 ### API-facing Lambda
 
@@ -1495,14 +1620,21 @@ Reasons:
 
 ### Internal service Lambda
 
-Internal callers usually authenticate using AWS Identity and Access Management roles and service permissions.
+Internal invocation is usually authorized with AWS Identity and Access
+Management roles, resource-based policies, and service permissions. The
+invoking principal's identity is not automatically propagated as end-user
+identity inside the Lambda event; pass a deliberate identity or authorization
+context when the business task needs one.
 
 Examples:
 
 ```text
+API Gateway integration role may start one named state machine.
+
 Step Functions execution role may invoke ValidateTrade Lambda.
 
-API-facing Lambda role may start one named state machine.
+API-facing Lambda role may start one named state machine when the
+Lambda-mediated pattern is selected.
 
 Worker Lambda role may read from one queue and write to one table.
 ```
@@ -1513,7 +1645,20 @@ The internal service Lambda should still enforce relevant authorization boundari
 
 ## Least-privilege permissions
 
-Different Lambda responsibilities require different Identity and Access Management permissions.
+Different boundary and Lambda responsibilities require different Identity and
+Access Management permissions.
+
+### Direct API Gateway integration
+
+The API Gateway integration role may require:
+
+```text
+states:StartExecution
+```
+
+on one state machine, or the equivalent single operation on the selected AWS
+service. It does not require a Lambda execution role because no boundary Lambda
+exists.
 
 ### API-facing Lambda
 
@@ -1561,9 +1706,15 @@ restricted to specific resources and key patterns.
 
 May require:
 
-- queue-consumption permissions provided by the event source mapping;
+- execution-role permissions for Lambda's poller to call SQS operations such
+  as `ReceiveMessage`, `DeleteMessage`, and `GetQueueAttributes` on the source
+  queue; an event source mapping does not grant these permissions by itself;
 - persistence permissions;
 - possibly dead-letter or notification permissions, depending on the design.
+
+The worker normally does not need `sqs:SendMessage` to the source queue or its
+DLQ merely to consume records. If the source queue uses a customer-managed KMS
+key, the execution role may also need `kms:Decrypt`.
 
 Separating responsibilities supports least privilege.
 
@@ -1582,7 +1733,7 @@ Which component should own each AWS service call?
 Example architecture:
 
 ```text
-API-facing Lambda
+API Gateway direct integration or API-facing Lambda
   → starts workflow
 
 Validation Lambda
@@ -1599,7 +1750,8 @@ This produces clearer dependency ownership.
 
 | Component | Dependency |
 |---|---|
-| API-facing Lambda | Step Functions client |
+| API Gateway direct integration | Step Functions service integration plus scoped IAM role |
+| API-facing Lambda | Step Functions client when the Lambda-mediated pattern is selected |
 | Validation Lambda | None, ideally |
 | Persistence Lambda | S3 and DynamoDB clients |
 | Notification component | SNS or EventBridge client |
@@ -1718,7 +1870,7 @@ The idempotency key depends on the contract:
 | Source | Candidate key |
 |---|---|
 | Public API | Client idempotency key |
-| Step Functions | Execution ID plus task or business key |
+| Step Functions | Business operation key plus task or stage; execution name remains a separate orchestration identifier |
 | SQS | Domain operation ID, not only message ID |
 | EventBridge | Event ID or domain event ID |
 | Trade persistence | Trade ID plus version or processing stage |
@@ -2090,9 +2242,35 @@ Different failure semantics
 
 ---
 
-## Recommended trade-processing boundary
+## Candidate trade-processing boundaries
 
-A clean architecture could look like this:
+The later implementation checkpoint must choose between two valid boundary
+patterns.
+
+### Option A: direct API Gateway integration
+
+```text
+POST /trades
+      |
+      v
+API Gateway
+  - authenticate and authorise
+  - validate or map the public request where configuration is sufficient
+  - call Step Functions StartExecution directly
+      |
+      v
+Step Functions
+      |
+      +--> ValidateTrade Lambda
+      +--> Choice
+      +--> Persistence task
+      +--> Publish outcome
+```
+
+Prefer this option when request mapping, IAM and response mapping can implement
+the public contract without non-trivial application code.
+
+### Option B: Lambda-mediated handoff
 
 ```text
 POST /trades
@@ -2104,38 +2282,34 @@ API Gateway
 API-facing Lambda
   - parse HTTP body
   - consume caller identity
-  - validate request envelope
-  - assign correlation ID
-  - create internal command
-  - start workflow
+  - validate the request envelope
+  - assign or propagate correlation context
+  - apply business-idempotency and execution-name rules
+  - create the internal command
+  - start the workflow
       |
       v
 Step Functions
       |
       +--> ValidateTrade Lambda
-      |      - validate domain rules
-      |      - return domain result
-      |
       +--> Choice
-      |      - valid
-      |      - invalid
-      |
       +--> Persistence task
-      |      - store artifact
-      |      - store status
-      |
       +--> Publish outcome
-             - TradeAccepted
-             - TradeRejected
 ```
 
-The external client sees an API contract.
+Prefer this option only when those responsibilities require code that would be
+awkward, unsafe or unmaintainable in API Gateway mappings.
 
-The internal system sees a domain contract.
-
----
+In both options, the external client sees an HTTP contract and the workflow sees
+a normalized internal contract. The later checkpoint must document why the
+selected option wins on security, reliability, maintainability, cost and
+operational complexity.
 
 ## Example contract progression
+
+The following progression illustrates the Lambda-mediated option. A direct
+integration would perform the public-to-internal mapping in API Gateway rather
+than Python.
 
 ### Stage 1: External request
 
@@ -2329,7 +2503,9 @@ This enables:
 - asynchronous status tracking;
 - controlled failure recovery.
 
-The API-facing Lambda remains small and responsive while internal processing follows its own reliability model.
+The HTTP boundary remains small and responsive while internal processing
+follows its own reliability model. That boundary may be implemented with a
+direct integration or an API-facing Lambda.
 
 ---
 
@@ -2556,7 +2732,15 @@ Which identifiers must survive across this boundary?
 ## Final mental model
 
 ```text
+Direct API Gateway service integration
+  uses configuration and IAM
+  maps a simple HTTP contract to an AWS service operation
+  removes an unnecessary Lambda hop
+```
+
+```text
 API-facing Lambda
+  is used only when boundary code is required
   knows HTTP
   protects the boundary
   normalizes external input
@@ -2574,20 +2758,24 @@ Internal service Lambda
 The architecture boundary is:
 
 ```text
-API Gateway event
+API Gateway
       |
-      v
-API-facing Lambda
+      +--> direct service integration
+      |       |
+      |       v
+      |    internal command
       |
-      |  removes HTTP-specific structure
-      v
-internal command
-      |
-      v
-Step Functions
-      |
-      v
-internal service Lambdas
+      +--> API-facing Lambda
+              |
+              | removes HTTP-specific structure
+              v
+           internal command
+              |
+              v
+         Step Functions
+              |
+              v
+      internal service Lambdas
 ```
 
 ---
@@ -2601,19 +2789,21 @@ It does not yet:
 - add production code;
 - add `boto3` calls;
 - deploy AWS resources;
-- write Terraform;
+- write Infrastructure as Code;
 - add new tests;
-- update `LEARNING-PLAN.md`;
 - claim any tests were run.
 
 The lesson outcome is:
 
 ```text
-An API-facing Lambda returns HTTP-shaped responses
-because HTTP is its contract.
+Use a direct API Gateway service integration when configuration and IAM can
+express the boundary safely.
 
-An internal service Lambda returns domain-shaped data
-because a workflow, event source, or internal caller is its contract.
+Use an API-facing Lambda when HTTP translation requires custom code; it returns
+HTTP-shaped responses because HTTP is its contract.
+
+An internal service Lambda returns domain-shaped data because a workflow, event
+source, or internal caller is its contract.
 ```
 
 ---
@@ -2633,3 +2823,19 @@ because a workflow, event source, or internal caller is its contract.
 | SDK | Software Development Kit |
 | SNS | Amazon Simple Notification Service |
 | SQS | Amazon Simple Queue Service |
+
+## References
+
+
+- API Gateway direct integration with Step Functions `StartExecution`:
+  <https://docs.aws.amazon.com/step-functions/latest/dg/tutorial-api-gateway.html>
+- API Gateway HTTP API AWS service integrations:
+  <https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-develop-integrations-aws-services.html>
+- API Gateway HTTP API integration subtypes:
+  <https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-develop-integrations-aws-services-reference.html>
+- Step Functions `StartExecution` idempotency and execution-name rules:
+  <https://docs.aws.amazon.com/step-functions/latest/apireference/API_StartExecution.html>
+- AWS Lambda SQS event source configuration and execution-role permissions:
+  <https://docs.aws.amazon.com/lambda/latest/dg/services-sqs-configure.html>
+- AWS Step Functions error handling:
+  <https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html>

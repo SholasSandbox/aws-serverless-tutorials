@@ -4,6 +4,7 @@ from typing import Any
 
 from trade_validation import (
     REQUIRED_FIELDS,
+    build_internal_trade,
     find_missing_required_field,
     validate_volume_mwh,
 )
@@ -87,14 +88,6 @@ def get_request_id(event: dict[str, Any], context: Any) -> str:
         return lambda_request_id
 
     return UNKNOWN_REQUEST_ID
-
-
-def build_internal_trade(request_body: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "trade_id": request_body["trade_id"],
-        "product": request_body["product"],
-        "volume_mwh": request_body["volume_mwh"],
-    }
 
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:

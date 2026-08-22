@@ -25,3 +25,11 @@ def validate_volume_mwh(volume_mwh: Any) -> str | None:
     elif volume_mwh <= 0:
         return ERROR_VOLUME_MWH_NOT_POSITIVE
     return None
+
+
+def build_internal_trade(request_body: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "trade_id": request_body["trade_id"],
+        "product": request_body["product"],
+        "volume_mwh": request_body["volume_mwh"],
+    }
