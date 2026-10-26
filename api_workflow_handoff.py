@@ -143,16 +143,12 @@ def build_execution_name(idempotency_key: str) -> str:
 def build_workflow_input(
     *,
     trade: Mapping[str, Any],
-    correlation_id: str,
     idempotency_key: str,
-    request_id: str,
 ) -> dict[str, Any]:
     """Build domain-shaped workflow input without HTTP envelope fields."""
     return {
         "trade": dict(trade),
-        "correlation_id": correlation_id,
         "idempotency_key": idempotency_key,
-        "request_id": request_id,
     }
 
 
@@ -245,9 +241,7 @@ def handle_trade_submission(
     execution_name = build_execution_name(idempotency_key)
     workflow_input = build_workflow_input(
         trade=trade,
-        correlation_id=correlation_id,
         idempotency_key=idempotency_key,
-        request_id=request_id,
     )
 
     if not state_machine_arn.strip():

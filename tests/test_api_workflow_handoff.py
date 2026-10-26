@@ -21,6 +21,7 @@ def make_event(
     *,
     body: str = '{"trade_id":"TRD-1001","product":"POWER","volume_mwh":25}',
     headers: dict[str, str] | None = None,
+    request_id: str = "REQ-456",
 ) -> dict:
     return {
         "body": body,
@@ -32,7 +33,7 @@ def make_event(
                 "X-Correlation-Id": "CORR-123",
             }
         ),
-        "requestContext": {"requestId": "REQ-456"},
+        "requestContext": {"requestId": request_id},
     }
 
 
@@ -61,9 +62,7 @@ def test_valid_request_starts_workflow_with_normalised_input() -> None:
             "product": "POWER",
             "volume_mwh": 25,
         },
-        "correlation_id": "CORR-123",
         "idempotency_key": "submission-001",
-        "request_id": "REQ-456",
     }
     assert "requestContext" not in json.loads(call["input"])
     assert "headers" not in json.loads(call["input"])
@@ -317,3 +316,131 @@ def test_execution_name_is_stable_for_same_idempotency_key() -> None:
     assert build_execution_name("submission-001") != build_execution_name(
         "submission-002"
     )
+
+
+def test_retry_with_same_idempotency_key_has_stable_workflow_input() -> None:
+    client = Mock()
+    client.start_execution.return_value = {
+        "executionArn": "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:example",
+        "startDate": "2026-01-01T00:00:00Z",
+    }
+
+    request_body = json.dumps(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    handle_trade_submission(
+        make_event(
+            body=request_body,
+            headers={"Idempotency-Key": "SUBMISSION-1001"},
+            request_id="API-788",
+        ),
+        SimpleNamespace(aws_request_id="LAMBDA-788"),
+        step_functions_client=client,
+        state_machine_arn=STATE_MACHINE_ARN,
+    )
+
+    handle_trade_submission(
+        make_event(
+            body=request_body,
+            headers={"Idempotency-Key": "SUBMISSION-1001"},
+            request_id="API-789",
+        ),
+        SimpleNamespace(aws_request_id="LAMBDA-789"),
+        step_functions_client=client,
+        state_machine_arn=STATE_MACHINE_ARN,
+    )
+
+    assert client.start_execution.call_count == 2
+
+    calls = client.start_execution.call_args_list
+
+    first_call = calls[0].kwargs
+    second_call = calls[1].kwargs
+
+    expected_execution_name = build_execution_name("SUBMISSION-1001")
+
+    assert first_call["name"] == expected_execution_name
+    assert first_call["name"] == second_call["name"]
+    assert first_call["input"] == second_call["input"]
+
+    assert first_call["stateMachineArn"] == STATE_MACHINE_ARN
+    assert second_call["stateMachineArn"] == STATE_MACHINE_ARN
+
+    workflow_input = json.loads(first_call["input"])
+
+    assert workflow_input["trade"]["trade_id"] == "TRD-1001"
+
+
+def test_changed_volume_same_key_changes_workflow_input() -> None:
+    client = Mock()
+    client.start_execution.return_value = {
+        "executionArn": "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:example",
+        "startDate": "2026-01-01T00:00:00Z",
+    }
+
+    request_body_a = json.dumps(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    handle_trade_submission(
+        make_event(
+            body=request_body_a,
+            headers={"Idempotency-Key": "SUBMISSION-1001"},
+            request_id="API-788",
+        ),
+        SimpleNamespace(aws_request_id="LAMBDA-788"),
+        step_functions_client=client,
+        state_machine_arn=STATE_MACHINE_ARN,
+    )
+
+    request_body_b = json.dumps(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 50,
+        }
+    )
+
+    handle_trade_submission(
+        make_event(
+            body=request_body_b,
+            headers={"Idempotency-Key": "SUBMISSION-1001"},
+            request_id="API-788",
+        ),
+        SimpleNamespace(aws_request_id="LAMBDA-789"),
+        step_functions_client=client,
+        state_machine_arn=STATE_MACHINE_ARN,
+    )
+
+    assert client.start_execution.call_count == 2
+
+    calls = client.start_execution.call_args_list
+
+    first_call = calls[0].kwargs
+    second_call = calls[1].kwargs
+
+    expected_execution_name = build_execution_name("SUBMISSION-1001")
+
+    assert first_call["name"] == expected_execution_name
+    assert first_call["name"] == second_call["name"]
+    assert first_call["input"] != second_call["input"]
+
+    workflow_a_input = json.loads(first_call["input"])
+    assert workflow_a_input["trade"]["volume_mwh"] == 25
+
+    workflow_b_input = json.loads(second_call["input"])
+    assert workflow_b_input["trade"]["volume_mwh"] == 50
+
+    assert (
+        workflow_a_input["trade"]["trade_id"] == workflow_b_input["trade"]["trade_id"]
+    )
+    assert workflow_a_input["trade"]["product"] == workflow_b_input["trade"]["product"]
