@@ -75,3 +75,39 @@ def classify_existing_submission(
         return "MATCH"
 
     return "CONFLICT"
+
+
+def confirm_submission_started(
+    table,
+    tenant_id: str,
+    idempotency_key: str,
+    execution_arn: str,
+) -> str:
+    """
+    Conditionally confirm that a submission's workflow started.
+
+    Returns:
+        "START_CONFIRMED" when the registry update succeeds.
+
+    Raises:
+        ClientError if the conditional update fails
+        or another DynamoDB service error occurs.
+    """
+    # Your implementation
+    table.update_item(
+        Key={
+            "tenant_id": tenant_id,
+            "idempotency_key": idempotency_key,
+        },
+        UpdateExpression="SET execution_arn = :arn, #s = :status",
+        ConditionExpression=Attr("status").eq("STARTING"),
+        ExpressionAttributeValues={
+            ":arn": execution_arn,
+            ":status": "START_CONFIRMED",
+        },
+        ExpressionAttributeNames={
+            "#s": "status",  # 'status' is a reserved word in DynamoDB
+        },
+    )
+
+    return "START_CONFIRMED"
