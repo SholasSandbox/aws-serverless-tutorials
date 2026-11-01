@@ -1,5 +1,11 @@
 # Tutorial Resume and Implementation Checkpoints
 
+> **Historical planning snapshot (reviewed 2026-08-10).**
+> The SAP-C02 mock cadence and Checkpoints A–C below no longer control
+> tutorial lesson order. The authoritative Lessons 38–45 roadmap is in
+> [LEARNING-PLAN.md](../LEARNING-PLAN.md). All live AWS work still requires
+> explicit user approval, a cost boundary and cleanup plan.
+
 Last reviewed: 2026-08-10
 
 ## Purpose
