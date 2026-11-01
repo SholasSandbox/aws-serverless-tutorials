@@ -2,8 +2,11 @@
 
 ## Controlling documents
 
-Read `README.md` and `LEARNING-PLAN.md` before changing this workspace. The
-learning plan controls lesson order, completion evidence, and parked topics.
+Read `README.md`, `LEARNING-PLAN.md`, and `learning-summary.md` before
+changing this workspace. `LEARNING-PLAN.md` controls the original Lessons
+38–45 roadmap; `learning-summary.md` records completed learning evidence.
+Flag any departure from that roadmap before starting it, including the
+original lesson, rationale, delayed work and planned point of resumption.
 
 ## Purpose and boundary
 
@@ -57,7 +60,11 @@ Before finishing a lesson:
 
 1. Summarize the behavior learned or changed.
 2. List tests or checks run.
-3. Update `LEARNING-PLAN.md` only when the lesson's evidence is complete.
-4. Record any misconception, weak area, or follow-up exercise.
-5. State whether the result is tutorial evidence only or a candidate pattern
-   for later adaptation elsewhere.
+3. Update `learning-summary.md` at the end of each completed lesson with
+   the original lesson number/title, key learning, concrete file/test evidence,
+   limitations, and next lesson or follow-up.
+4. Update `LEARNING-PLAN.md` only when that lesson's evidence is complete.
+5. Record misconceptions, weak areas and follow-up work.
+6. Distinguish conceptual, locally tested and live AWS evidence. Record test
+   counts and timestamps only when supported by supplied or tool evidence.
+7. Do not silently renumber or expand the standing Lessons 38–45.
