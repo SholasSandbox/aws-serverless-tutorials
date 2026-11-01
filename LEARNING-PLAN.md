@@ -1,26 +1,54 @@
 # Python and Serverless Learning Plan
 
-Last reviewed: 2026-08-10
+Last reviewed: 2026-11-01 (08:42 UTC; roadmap reconciliation)
 
 ## Objective
 
-Build confident Python and AWS serverless engineering skills through small,
-tested exercises. This is a parallel SAP-C02 learning track and is not the
-Energy Data Lakehouse implementation.
+Build independently demonstrable Python and AWS serverless engineering
+competence through small, locally tested exercises. Prefer serverless-first
+architectures, container escape hatches when justified, and controlled AI
+orchestration only after the foundation is established. AWS Skill Builder is
+complementary; tutorial evidence is separate from the Energy Data Lakehouse.
 
-## Programme Priority Gate
+## Programme Priority and Standing Roadmap
 
-During the current SAP-C02 validation period, the separate Energy Data
-Lakehouse SAP-C02 readiness tracker controls programme priority. The learner
-will maintain two full timed mocks per week. Tutorial work must not displace a
-mock, its review, spaced remediation, or the current DR, migration, and cost
-decision work.
+Hands-on engineering competence, practical architecture decisions and sustainable
+learning time now drive this programme. AWS Skill Builder Serverless Developer is
+a complementary foundation, not a replacement for writing and testing code.
 
-An unchecked tutorial item is backlog, not authorization to start it. Local
-implementation may resume only at one of the evidence checkpoints recorded in
-`docs/tutorial-resume-checkpoints.md`, and only when it fits without weakening
-the two-mock cadence. Live AWS work still requires explicit approval for the
-specific lab.
+The August SAP-C02 two-mock schedule and the gates in
+`docs/tutorial-resume-checkpoints.md` are **historical**. They do not govern
+the current lesson sequence. The live AWS approval requirement remains.
+
+### Controlling Lessons 38–45
+
+Do not renumber, expand, or replace these lessons without calling out the
+original lesson affected, the reason, what is delayed and where work resumes.
+
+| Lesson | Original heading | Status / next action |
+| --- | --- | --- |
+| 38 | API Lambda → internal workflow contract | **Complete locally** — post-38B input contains normalised trade and idempotency key, not attempt-specific request/correlation IDs |
+| 39 | Lambda → Step Functions `StartExecution` with boto3 | **Complete locally** — injected adapter, stable input, correct start/error contracts; no live AWS |
+| 40 | Step Functions input/output data flow | **Next** — JSON movement and state transformation |
+| 41 | Choice + validation path | Planned |
+| 42 | Retry/Catch + workflow failure semantics | Planned |
+| 43 | Idempotent workflow starts / duplicate requests | **Partially advanced early** — DynamoDB registry implemented locally, integration/recovery outstanding |
+| 44 | IAM boundary for API Lambda and workflow | Planned |
+| 45 | Controlled AWS deployment of this vertical slice | Planned; explicit approval and cost/cleanup plan required |
+
+The October "Lesson 39: DynamoDB Submission Registry" was an **out-of-order
+Lesson 43 exercise**, not a replacement for original Lesson 39. The next
+active lesson is **40**. Defer durable exact-input retention, API-registry
+integration, recovery ownership and workers to Lesson 43 or a separately
+approved later exercise.
+
+### Learner working approach
+
+Explain the requirement, then give the learner a small independent coding task.
+Review with defects and hints before showing a full correction unless requested.
+Prefer pytest, Ruff, injected boto3 clients, local-only tests and small,
+explicit service boundaries. Avoid unrelated refactoring, deployment or
+frameworks.
 
 ## Evidence Rule
 
@@ -56,6 +84,22 @@ A capability may cite more than one level when separate conceptual and local
 artifacts exist. A dash means that the target evidence level has not been
 attained.
 
+## End-of-Lesson Completion Protocol
+
+After **every completed lesson**, update both documentation records:
+
+1. Add an entry in `learning-summary.md` using the original lesson number and
+   title, key concepts and trade-offs, files/artifacts, exact test evidence,
+   outstanding weaknesses and the next lesson.
+2. Update this plan's roadmap status only when supported by evidence.
+3. Clearly label **conceptual**, **locally tested**, or **live AWS** evidence;
+   mocked calls do not demonstrate live concurrency or idempotency guarantees.
+4. Record dates/times, test results and commit IDs only when supported by
+   terminal output or an available tool, not inference.
+5. Before departing from original Lessons 38–45, record the reason,
+   opportunity cost, affected lesson and planned point of resumption.
+6. Never make unapproved AWS resource, IAM, or deployment changes.
+
 ## Current Baseline
 
 | Capability | Completion status | Evidence level | Evidence |
@@ -70,7 +114,7 @@ attained.
 | Combined S3 and DynamoDB persistence | Partial | Local tested | Deterministic S3 keys and compact workflow responses are tested; real conditional-duplicate handling and live AWS behavior remain unproved |
 | boto3 service boundary | Partial | Local tested | S3 client and DynamoDB resource construction, mocked `PutObject`, conditional `PutItem`, and dependency injection are tested; SDK configuration, realistic `ClientError` classification, and live calls remain open |
 | Repository documentation and governance | Completed | Conceptual | `README.md`, `AGENTS.md`, this plan |
-| Test baseline | Verified | Local tested | 234 tests passed on 2026-08-10 with `.venv/bin/python -m pytest -q` |
+| Test baseline | Verified | Local tested | Latest user-supplied terminal output: 249 tests passed, including 11 submission-registry tests; Ruff all checks passed and `git diff --check` reported no issues |
 | Intentional Git baseline | Completed | Local tested | Repository initialised; `.gitignore` covers `.venv`, caches, bytecode, `.DS_Store`, and `archive/` |
 | Consolidation review | Completed | Local tested | Import order, formatting, trailing whitespace, dead comments, stale README note, and empty archive file resolved in Lesson 27 |
 | Persistence handler boundary hardening | Completed | Local tested | `trade_persistence_handler.py` boundary validation and edge-case tests added in Lesson 28 |
@@ -85,13 +129,15 @@ attained.
 | EventBridge vs SQS vs direct Step Functions selection | Completed | Conceptual | Lesson 35 decision note compares fact publication, queued work, and orchestration |
 | Serverless entry-point selection | Completed | Conceptual | Lesson 36 compares API Gateway, EventBridge, SQS, and direct Step Functions invocation |
 | API-facing vs internal Lambda boundaries | Completed | Conceptual | Lesson 37 separates HTTP translation, internal contracts, retry ownership, identity context, and least privilege |
-| API-to-Step Functions handoff adapter | Partial | Local tested | `api_workflow_handoff.py` and focused mocked tests validate the local Lambda-mediated pattern; the post-attempt architecture decision and all live evidence remain open |
+| API-to-Step Functions handoff adapter | Completed locally | Local tested | `api_workflow_handoff.py` and `tests/test_api_workflow_handoff.py` verify injected `StartExecution`, retry-stable input/name and honest API responses; not deployed |
+| DynamoDB submission registry (partial Lesson 43) | Partial | Local tested | `submission_registry.py` and 11 focused tests cover conditional registration, fingerprint classification and conditional start confirmation; not integrated or deployed |
 | Live tutorial AWS integration | Not started | — | No tutorial resources have been deployed or exercised in AWS |
 
-## Tutorial Backlog and Resume Sequence
+## Historical Backlog (June–August 2026)
 
-Nothing in this section is active merely because it is unchecked. Resume order
-and evidence gates are controlled by `docs/tutorial-resume-checkpoints.md`.
+This section preserves prior evidence and unresolved quality gaps, but it
+does **not** control current lesson order. The Lessons 38–45 table above is
+authoritative. Unchecked backlog is not authorization for unrelated work.
 
 ### 1. Consolidate the existing lessons
 
@@ -165,9 +211,12 @@ and evidence gates are controlled by `docs/tutorial-resume-checkpoints.md`.
   injection and import-safe tests.
 - No tutorial IAM role, API route, Lambda, state machine, log group, metric, or
   alarm has been deployed or verified in AWS.
-- `api_workflow_handoff.py` is a local teaching adapter, not the selected
-  architecture for a deployed vertical slice. The direct-integration versus
-  Lambda-mediated decision remains at Checkpoint C.
+- `api_workflow_handoff.py` demonstrates a Lambda-mediated handoff locally,
+  but the deployed integration choice versus direct API Gateway integration
+  still needs an explicit decision before Lesson 45.
+- `submission_registry.py` is not yet integrated with that API handoff.
+  Canonical fingerprint generation, tenant-safe execution naming, durable
+  serialized start input and crash recovery remain open under Lesson 43.
 - These limitations are recorded backlog. This planning update does not
   authorize code changes or AWS deployment.
 
@@ -485,6 +534,29 @@ Evidence:
 SAP-C02 mapping: Domain 1 security and responsibility boundaries, Domain 2
 serverless design, and Domain 3 operational improvement. This is tutorial
 evidence only, not Energy Data Lakehouse implementation.
+
+### Lesson 38 — API Lambda → internal workflow contract
+
+Status: **Completed locally**. The post-38B internal workflow input contains
+normalised trade plus `idempotency_key`, not attempt-specific request or
+correlation IDs. Local contract tests support this. No live AWS execution.
+
+### Lesson 39 — Lambda → Step Functions StartExecution with boto3
+
+Status: **Completed locally**. `start_trade_workflow()` and the
+`handle_trade_submission()` path in `api_workflow_handoff.py` demonstrate an
+injected boto3 `StartExecution` boundary, deterministic name/input,
+`202 Accepted`, and client-safe error handling. Local tests only.
+
+### Early Lesson 43 — DynamoDB registry (not complete)
+
+Status: **Partial, locally tested**. `submission_registry.py` implements
+conditional `PutItem`, strongly consistent `GetItem` fingerprint classification
+and conditional `STARTING` to `START_CONFIRMED` `UpdateItem`.
+Learner-supplied terminal evidence: **11 registry tests passed; 249 total
+tests passed**. Commits `a79e5f2` and `b430757` were pushed to `origin/main`.
+No end-to-end duplicate handling, durable execution identity, recovery worker
+or live AWS service guarantees have been demonstrated. Resume at Lesson 40.
 
 ## Parked Topics
 
