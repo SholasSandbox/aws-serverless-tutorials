@@ -440,3 +440,61 @@ the eventual API integration architecture.
 This is local tutorial evidence only. The Checkpoint C architecture decision
 between API Gateway direct integration and a Lambda-mediated handoff remains
 open, and the separate Lesson 38 design document remains pending review.
+
+---
+
+### Lesson 38: API Lambda → internal workflow contract
+
+**Status:** Completed locally; no live AWS execution.
+
+**Evidence:** `api_workflow_handoff.py`, `trade_validation.py` and their
+focused tests establish a stable internal workflow command. Lesson 38B
+removed per-HTTP-attempt `request_id` and `correlation_id` from the
+workflow input, leaving normalised `trade` and `idempotency_key`. Attempt
+identifiers remain in API logs and responses.
+
+**Key learning:** Retry-stable internal input represents the business
+submission, not the identity of an HTTP attempt.
+
+### Lesson 39: Lambda → Step Functions StartExecution with boto3
+
+**Status:** Completed locally; not deployed.
+
+**Evidence:** `start_trade_workflow()` in `api_workflow_handoff.py` uses
+an injected Step Functions client and calls `start_execution` with state
+machine ARN, deterministic execution name and serialized JSON workflow
+input. The corresponding tests verify call arguments, stable retry name/input,
+truthful `202 Accepted` responses and selected client-safe failure paths.
+
+**Key learning:** A successful workflow-start request confirms initiation,
+not business completion. A lost SDK response leaves an uncertain start outcome.
+Local mocks do not prove live Standard Workflow idempotency.
+
+**Boundary:** No AWS resources deployed; the deployment design must still
+justify direct API Gateway integration versus a Lambda-mediated path.
+
+### Lesson 43: Early DynamoDB submission registry (partial, out of order)
+
+**Status:** Partially implemented locally before Lessons 40–42, then
+reclassified to the original Lesson 43. **Next lesson remains 40**.
+
+**Evidence:** `submission_registry.py` and `tests/test_submission_registry.py`
+implement three independent operations: conditional `register_submission()`,
+strongly consistent `classify_existing_submission()` comparing fingerprints,
+and conditional `confirm_submission_started()` persisting the execution ARN.
+The latest user-supplied terminal output shows **11 registry tests** and
+**249 full-suite tests passed**, Ruff clean and `git diff --check` without
+reported errors. Commits `a79e5f2` and `b430757` were pushed to `origin/main`.
+
+**Key learning:** `STARTING` means the registry has not durably confirmed
+workflow initiation; `START_CONFIRMED` proves initiation, not success.
+DynamoDB registration and Step Functions initiation are not atomic.
+Preserve the original submission/execution identity when retrying.
+
+**Open work:** Canonical fingerprint generation, tenant-scoped execution naming,
+durable exact serialized input retention, API-registry integration,
+concurrent recovery ownership, and crash-window reconciliation. These tests
+mock DynamoDB; no real AWS concurrency guarantee, recovery worker or deployed
+trade-submission slice is claimed.
+
+**Next:** Original Lesson 40 — Step Functions input/output data flow.
