@@ -1,6 +1,6 @@
 # Python and Serverless Learning Plan
 
-Last reviewed: 2026-11-01 (08:42 UTC; roadmap reconciliation)
+Last reviewed: 2026-11-03 (15:11 UTC; Lesson 40 local evidence update)
 
 ## Objective
 
@@ -29,8 +29,8 @@ original lesson affected, the reason, what is delayed and where work resumes.
 | --- | --- | --- |
 | 38 | API Lambda → internal workflow contract | **Complete locally** — post-38B input contains normalised trade and idempotency key, not attempt-specific request/correlation IDs |
 | 39 | Lambda → Step Functions `StartExecution` with boto3 | **Complete locally** — injected adapter, stable input, correct start/error contracts; no live AWS |
-| 40 | Step Functions input/output data flow | **Next** — JSON movement and state transformation |
-| 41 | Choice + validation path | Planned |
+| 40 | Step Functions input/output data flow | **Complete locally** — JSONPath Task input/output contract and focused structural test passed; no live AWS execution |
+| 41 | Choice + validation path | **Next** |
 | 42 | Retry/Catch + workflow failure semantics | Planned |
 | 43 | Idempotent workflow starts / duplicate requests | **Partially advanced early** — DynamoDB registry implemented locally, integration/recovery outstanding |
 | 44 | IAM boundary for API Lambda and workflow | Planned |
@@ -38,7 +38,7 @@ original lesson affected, the reason, what is delayed and where work resumes.
 
 The October "Lesson 39: DynamoDB Submission Registry" was an **out-of-order
 Lesson 43 exercise**, not a replacement for original Lesson 39. The next
-active lesson is **40**. Defer durable exact-input retention, API-registry
+active lesson is **41**. Defer durable exact-input retention, API-registry
 integration, recovery ownership and workers to Lesson 43 or a separately
 approved later exercise.
 
@@ -109,12 +109,13 @@ After **every completed lesson**, update both documentation records:
 | EventBridge event handling | Completed | Local tested | `eventbridge_trade_handler.py`, corresponding tests |
 | SQS record handling and partial batch responses | Completed | Local tested | `sqs_trade_handler.py`, corresponding tests; live event-source mapping configuration is not proved |
 | Step Functions task validation | Completed | Local tested | Handler tests and structurally checked ASL examples; no tutorial workflow has run in AWS |
+| Step Functions JSONPath validation handoff (Lesson 40) | Complete locally | Conceptual + local tested | `step-functions/trade-validation-with-task.asl.json` uses `InputPath: $.trade` and `ResultPath: $.validation`; `tests/test_step_functions_validation_contract.py` verifies the direct-ARN Task, selected input, merge location and next-state transition; structural test only |
 | Accepted/rejected S3 result artifacts | Completed | Local tested | `trade_result_persistence.py`, corresponding mocked `PutObject` tests |
 | DynamoDB status records | Partial | Local tested | Conditional `attribute_not_exists(trade_id)` helper and injected duplicate-exception tests exist, but the real workflow does not yet wire the generated conditional-check exception into duplicate-as-success handling |
 | Combined S3 and DynamoDB persistence | Partial | Local tested | Deterministic S3 keys and compact workflow responses are tested; real conditional-duplicate handling and live AWS behavior remain unproved |
 | boto3 service boundary | Partial | Local tested | S3 client and DynamoDB resource construction, mocked `PutObject`, conditional `PutItem`, and dependency injection are tested; SDK configuration, realistic `ClientError` classification, and live calls remain open |
 | Repository documentation and governance | Completed | Conceptual | `README.md`, `AGENTS.md`, this plan |
-| Test baseline | Verified | Local tested | Latest user-supplied terminal output: 249 tests passed, including 11 submission-registry tests; Ruff all checks passed and `git diff --check` reported no issues |
+| Test baseline | Verified | Local tested | Latest learner-supplied Lesson 40 regression: 249 tests passed in 0.22s; focused contract test: 1 passed in 0.01s; Ruff all checks passed; `git diff --check` reported no errors |
 | Intentional Git baseline | Completed | Local tested | Repository initialised; `.gitignore` covers `.venv`, caches, bytecode, `.DS_Store`, and `archive/` |
 | Consolidation review | Completed | Local tested | Import order, formatting, trailing whitespace, dead comments, stale README note, and empty archive file resolved in Lesson 27 |
 | Persistence handler boundary hardening | Completed | Local tested | `trade_persistence_handler.py` boundary validation and edge-case tests added in Lesson 28 |
@@ -548,6 +549,53 @@ Status: **Completed locally**. `start_trade_workflow()` and the
 injected boto3 `StartExecution` boundary, deterministic name/input,
 `202 Accepted`, and client-safe error handling. Local tests only.
 
+### Lesson 40 — Step Functions input/output data flow
+
+Status: **Complete locally (conceptual + local tested)**. The existing direct
+Lambda-ARN `ValidateTrade` Task selects `$.trade` as the handler input and
+inserts the direct Lambda validation return under `$.validation` using
+`ResultPath`. The original workflow input retains `trade` and
+`idempotency_key`; `OutputPath` is omitted so its default `$` passes the
+combined state to `IsTradeValid`.
+
+Evidence:
+
+- `step-functions/trade-validation-with-task.asl.json` adds
+  `"InputPath": "$.trade"` and preserves `"ResultPath": "$.validation"`, the
+  existing Lambda ARN, and the transition to `IsTradeValid`;
+- `tests/test_step_functions_validation_contract.py` verifies those four
+  contract fields and Task type using the parsed ASL definition;
+- learner-supplied focused pytest result: **1 passed in 0.01s**;
+- learner-supplied full regression: **249 passed in 0.22s**; Ruff
+  `All checks passed!`; `git diff --check` returned no errors.
+
+Key learning: `InputPath` selects data sent to a Task, `ResultPath` inserts
+or replaces the Task result within the original state input, and `OutputPath`
+selects the state output. A direct Lambda ARN returns the handler's value;
+the optimised `lambda:invoke` integration instead exposes it under `Payload`.
+
+Limits: The test structurally verifies ASL fields; it neither executes the
+state machine nor independently validates AWS runtime JSON transformations.
+There is no live AWS execution or deployment. No Lesson 41 Choice-state change
+or Lesson 43 registry integration is claimed. **Next:** original Lesson 41 —
+Choice + validation path.
+
+### Lesson 40: Step Functions input/output data flow
+
+**Status:** Complete locally (conceptual + locally tested); no live AWS execution.
+
+**Evidence:**
+
+- `step-functions/trade-validation-with-task.asl.json`: direct-ARN `ValidateTrade` Task uses `InputPath: $.trade` to pass the nested trade to the existing flat-input Lambda and `ResultPath: $.validation` to retain the original workflow input and add the validation result.
+- `tests/test_step_functions_validation_contract.py`: checks Task type, direct Lambda ARN, `InputPath`, `ResultPath`, and `Next` transition.
+- Focused pytest: **1 passed in 0.01s**. Full regression: **249 passed in 0.22s**. Ruff: **All checks passed**. `git diff --check`: no errors reported.
+
+**Key learning:** `InputPath` selects Task input; `ResultPath` merges, replaces, or discards the Task result relative to the original state input; `OutputPath` selects what the next state receives. The direct Lambda ARN returns the handler result directly, whereas the optimised `lambda:invoke` integration has a `Payload` envelope.
+
+**Limitations:** The local pytest test checks ASL structure only; no Step Functions runtime transformation or live AWS workflow was exercised. The Lesson 43 DynamoDB registry remains incomplete and parked.
+
+**Next:** Lesson 41 — Choice + validation path.
+
 ### Early Lesson 43 — DynamoDB registry (not complete)
 
 Status: **Partial, locally tested**. `submission_registry.py` implements
@@ -556,7 +604,8 @@ and conditional `STARTING` to `START_CONFIRMED` `UpdateItem`.
 Learner-supplied terminal evidence: **11 registry tests passed; 249 total
 tests passed**. Commits `a79e5f2` and `b430757` were pushed to `origin/main`.
 No end-to-end duplicate handling, durable execution identity, recovery worker
-or live AWS service guarantees have been demonstrated. Resume at Lesson 40.
+or live AWS service guarantees have been demonstrated. Resume this registry
+work at original Lesson 43; the next active lesson is 41.
 
 ## Parked Topics
 
