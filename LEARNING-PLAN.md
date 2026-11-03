@@ -1,14 +1,37 @@
 # Python and Serverless Learning Plan
 
-Last reviewed: 2026-11-03 (15:11 UTC; Lesson 40 local evidence update)
+Last reviewed: 2026-11-03 (assessment readiness and learning evidence reconciliation)
 
 ## Objective
 
-Build independently demonstrable Python and AWS serverless engineering
-competence through small, locally tested exercises. Prefer serverless-first
-architectures, container escape hatches when justified, and controlled AI
-orchestration only after the foundation is established. AWS Skill Builder is
-complementary; tutorial evidence is separate from the Energy Data Lakehouse.
+Develop independently demonstrable Python, AWS serverless and,
+subsequently, applied AI engineering competence.
+
+The programme builds on the completed SAP-C02 architectural
+foundation and supports the longer-term goal of combining
+financial-services, energy-trading and regulated-industry
+experience with credible cloud and AI architecture capability.
+
+Learning should produce evidence in six areas:
+
+| Focus | Demonstrable capability |
+| --- | --- |
+| Python engineering | Independently implement, test, debug and explain maintainable Python code |
+| Serverless engineering | Build reliable AWS integrations with explicit contracts, persistence and failure handling |
+| Security and operations | Reason about IAM, retries, idempotency, observability, cost and recovery |
+| Architectural judgement | Translate requirements into defensible designs and explain alternatives, constraints and business outcomes |
+| Applied AI engineering (future stage) | Integrate Bedrock and model APIs, evaluate outputs, manage tool boundaries, failures, data exposure and inference costs |
+| Employability evidence | Demonstrate solutions, diagnose defects and communicate technical and architectural decisions |
+
+The original Lessons 38–45 remain the controlling serverless
+roadmap. Applied AI implementation is deferred until the
+serverless foundation is complete.
+
+AWS Skill Builder complements the tutorials. The Energy Data
+Lakehouse remains a separate implementation and evidence boundary.
+
+Historical SAP-C02 mappings are retained for reference but
+do not govern current progression.
 
 ## Programme Priority and Standing Roadmap
 
@@ -49,6 +72,110 @@ Review with defects and hints before showing a full correction unless requested.
 Prefer pytest, Ruff, injected boto3 clients, local-only tests and small,
 explicit service boundaries. Avoid unrelated refactoring, deployment or
 frameworks.
+
+### Independence milestones
+
+Use meaningful milestones within the existing lessons to demonstrate that the
+learner can:
+
+- Implement and explain a small requirement using documentation and normal
+  development tools.
+- Diagnose a realistic or injected failure using tests and logs, and explain
+  why the fix works.
+- Provide reproducible setup instructions and explain the design's security,
+  reliability and cost trade-offs.
+
+Assistance is compatible with independence when the learner understands,
+can adapt and can troubleshoot the resulting solution. Record the assistance
+used and any remaining weaknesses in `learning-summary.md`; these criteria
+do not establish that earlier lessons already demonstrate independence.
+Use existing lesson artifacts rather than adding a separate course or project.
+
+## Serverless Assessment Readiness
+
+AWS Serverless Demonstrated is a separate practical readiness milestone.
+Attempt it when the learner can independently implement and troubleshoot the
+serverless capabilities in the current assessment objectives. AI training,
+RAG/agent practice and Bedrock competence are not prerequisites in this plan.
+
+AWS's [microcredential overview](https://aws.amazon.com/blogs/training-and-certification/microcredentials-from-aws-are-now-free-heres-why-that-matters/)
+distinguishes serverless implementation and troubleshooting from the separate
+Bedrock-focused Agentic AI assessment. Check the current assessment guide
+before planning an attempt; the overview is not an exhaustive syllabus.
+
+Review readiness against the assessed services using relevant implementation,
+console/CLI troubleshooting and operational evidence. Course completion and
+local mocked tests alone do not establish practical assessment readiness.
+Record demonstrated capabilities and remaining gaps in `learning-summary.md`.
+
+This milestone can be reviewed as serverless skills develop; it does not
+reorder Lessons 38–45 or depend on completing the applied AI extension.
+Existing approval, cost and cleanup controls continue to apply to AWS labs.
+
+## Post-Lesson 45: Applied AI Extension
+
+Status: Planned — not started.
+
+This stage extends the serverless foundation into applied AI
+engineering and architecture. It does not modify, renumber
+or add work to Lessons 38–45.
+
+### Entry conditions
+
+- Complete Lessons 38–45 with the appropriate evidence.
+- Complete AWS Skill Builder Serverless Developer before
+  starting AWS SimuLearn: Generative AI Architect.
+- Retain the existing approval, cost and cleanup controls
+  for any deployment.
+
+### Learning progression
+
+1. AWS SimuLearn: Generative AI Architect
+   Develop customer requirements discovery, architectural
+   decision-making and AWS AI solution implementation.
+
+2. RAG/Agent Practice with Bedrock
+   Strengthen independent model integration, retrieval,
+   evaluation, tool control, security and troubleshooting.
+
+### Engineering outcomes
+
+After the serverless foundation, select bounded AI
+integration work that demonstrates:
+
+- Secure and reliable model invocation.
+- Controlled interaction between AI and AWS workflows.
+- Validation, evaluation and failure handling.
+- Observability, latency, cost and data-exposure controls.
+- Independent console and CLI troubleshooting.
+
+Reuse relevant serverless patterns rather than creating
+unnecessary infrastructure or additional projects.
+
+Each implementation must distinguish conceptual,
+locally tested and live AWS evidence.
+
+### Completion criteria for a bounded AI exercise
+
+Before implementation, define the use case, a small evaluation dataset,
+expected behaviour and measurable acceptance thresholds. Completion requires:
+
+- Recorded evaluation results against the defined quality criteria.
+- Tests or evaluation cases for invalid outputs, dependency failures and any
+  retrieval or tool boundaries used by the exercise.
+- Evidence against the agreed latency, inference-cost and data-exposure limits.
+- Reproducible instructions and an explanation of the design, limitations
+  and troubleshooting decisions, using the independence milestones above.
+
+Record the model/configuration, assistance used, evidence level and unresolved
+weaknesses in `learning-summary.md`. Mocked results do not establish live model
+quality, latency or cost. Course completion alone does not complete an
+independent AI exercise. These criteria apply to future selected exercises;
+they do not authorise additional work now.
+
+This section defines future direction. It does not
+authorise immediate AI development, AWS deployment,
+additional learning assignments or workload expansion.
 
 ## Evidence Rule
 
@@ -580,22 +707,6 @@ There is no live AWS execution or deployment. No Lesson 41 Choice-state change
 or Lesson 43 registry integration is claimed. **Next:** original Lesson 41 —
 Choice + validation path.
 
-### Lesson 40: Step Functions input/output data flow
-
-**Status:** Complete locally (conceptual + locally tested); no live AWS execution.
-
-**Evidence:**
-
-- `step-functions/trade-validation-with-task.asl.json`: direct-ARN `ValidateTrade` Task uses `InputPath: $.trade` to pass the nested trade to the existing flat-input Lambda and `ResultPath: $.validation` to retain the original workflow input and add the validation result.
-- `tests/test_step_functions_validation_contract.py`: checks Task type, direct Lambda ARN, `InputPath`, `ResultPath`, and `Next` transition.
-- Focused pytest: **1 passed in 0.01s**. Full regression: **249 passed in 0.22s**. Ruff: **All checks passed**. `git diff --check`: no errors reported.
-
-**Key learning:** `InputPath` selects Task input; `ResultPath` merges, replaces, or discards the Task result relative to the original state input; `OutputPath` selects what the next state receives. The direct Lambda ARN returns the handler result directly, whereas the optimised `lambda:invoke` integration has a `Payload` envelope.
-
-**Limitations:** The local pytest test checks ASL structure only; no Step Functions runtime transformation or live AWS workflow was exercised. The Lesson 43 DynamoDB registry remains incomplete and parked.
-
-**Next:** Lesson 41 — Choice + validation path.
-
 ### Early Lesson 43 — DynamoDB registry (not complete)
 
 Status: **Partial, locally tested**. `submission_registry.py` implements
@@ -615,19 +726,39 @@ work at original Lesson 43; the next active lesson is 41.
 - complex microservices
 - production deployment automation beyond a deliberately approved lesson
 
-## Relationship to SAP-C02
+## Relationship to Employability and AWS/AI Competence
 
-Tutorial sessions may be logged in the SAP-C02 readiness tracker when they are
-mapped to a domain or weak area. Useful mappings include:
+SAP-C02 has been passed. The programme now builds on that architectural
+foundation to develop practical Python, AWS and AI engineering competence
+that can be demonstrated through working software, troubleshooting,
+technical explanations and credible portfolio evidence.
 
-| Tutorial topic | SAP-C02 relevance |
+Choose learning tasks for the capabilities they develop and the evidence
+they produce. Historical SAP-C02 domain mappings remain useful context;
+exam-readiness tracking no longer controls progression.
+
+| Focus | Demonstrable capability |
 | --- | --- |
-| EventBridge, SQS, Step Functions | Domain 2 integration, decoupling, failure handling, and new-solution design |
-| S3 and DynamoDB persistence | Domain 2 storage selection and Domain 3 reliability/performance improvement |
-| IAM action/resource reasoning | Domain 1 organizational/security design and Domain 3 security improvement |
-| retries, idempotency, DLQs, compensation | Domain 2 resilience and Domain 3 continuous improvement |
-| local tests and structured logging | Domain 3 operational excellence and observability |
+| Python engineering | Independently write, test, debug and explain small, maintainable programs |
+| AWS serverless engineering | Build service integrations with explicit contracts, configuration, persistence and failure handling |
+| Secure and reliable operation | Explain and test IAM boundaries, retries, idempotency, observability and recovery |
+| Applied AI engineering | Integrate model APIs, validate outputs, evaluate quality, handle failures and manage data exposure, latency and cost |
+| Employability evidence | Present reproducible projects, explain design trade-offs and diagnose realistic failures |
 
-Tutorial completion does not update a lakehouse implementation checklist row
-unless the pattern is separately adapted, tested, and evidenced in that
-repository.
+Lessons 38–45 remain the current serverless foundation. Any change to their
+sequence must identify the affected lesson, rationale, delayed work and
+planned point of resumption. Applied AI should follow an explicit learning
+stage with prerequisites and completion criteria.
+
+Progress is demonstrated by increasing independence: implementing a small
+requirement, testing meaningful failure cases, diagnosing defects and
+explaining the resulting design. Completing guided exercises alone does
+not establish job readiness.
+
+Evidence must distinguish conceptual understanding, locally tested
+behaviour and live AWS operation. Controlled deployment exercises require
+explicit approval, cost limits and cleanup plans.
+
+This tutorial remains separate from the Energy Data Lakehouse. Patterns
+count as lakehouse implementation evidence only after separate adaptation,
+testing and verification in that repository.

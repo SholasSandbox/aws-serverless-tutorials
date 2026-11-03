@@ -1,6 +1,25 @@
 # Learning Summary
 
-Last reviewed: 2026-08-10
+Last reviewed: 2026-11-03 (Lesson 40 evidence and programme direction reconciliation)
+
+Current direction: SAP-C02 has been passed. The programme now builds practical
+Python, AWS serverless and subsequent applied AI competence for employability.
+Historical exam mappings remain reference material. Lesson 40 is complete
+locally; **the next active lesson is 41 — Choice + validation path**.
+
+AWS Serverless Demonstrated readiness is assessed separately from AI readiness;
+AI training and Bedrock practice are not prerequisites in this plan. Readiness
+must be supported by relevant practical evidence against the current assessment
+objectives, rather than inferred from course completion or local mocked tests.
+The applied AI extension remains planned after Lessons 38–45.
+
+At meaningful milestones, record the ability to implement and explain a small
+requirement, diagnose a failure, reproduce the solution and discuss security,
+reliability and cost trade-offs. Record assistance used and remaining weaknesses;
+these are future evidence criteria, not newly demonstrated capabilities.
+Future bounded AI exercises also require a defined evaluation dataset and
+quality, failure-handling, latency, cost and data-exposure criteria. See
+`LEARNING-PLAN.md` for the controlling readiness and completion criteria.
 
 ---
 
@@ -476,7 +495,8 @@ justify direct API Gateway integration versus a Lambda-mediated path.
 ### Lesson 43: Early DynamoDB submission registry (partial, out of order)
 
 **Status:** Partially implemented locally before Lessons 40–42, then
-reclassified to the original Lesson 43. **Next lesson remains 40**.
+reclassified to the original Lesson 43. The next lesson at that point was 40;
+following its local completion, **the current next lesson is 41**.
 
 **Evidence:** `submission_registry.py` and `tests/test_submission_registry.py`
 implement three independent operations: conditional `register_submission()`,
@@ -497,4 +517,37 @@ concurrent recovery ownership, and crash-window reconciliation. These tests
 mock DynamoDB; no real AWS concurrency guarantee, recovery worker or deployed
 trade-submission slice is claimed.
 
-**Next:** Original Lesson 40 — Step Functions input/output data flow.
+**Next:** Original Lesson 41 — Choice + validation path. Resume registry
+integration and recovery work at original Lesson 43.
+
+### Lesson 40: Step Functions input/output data flow
+
+**Status:** Complete locally (conceptual + locally tested); no live AWS execution.
+
+**Evidence:**
+
+- `step-functions/trade-validation-with-task.asl.json`: the direct Lambda-ARN
+  `ValidateTrade` Task selects `$.trade` using `InputPath`, retains the original
+  workflow input and stores the handler result under `$.validation` using
+  `ResultPath`, then transitions to `IsTradeValid`.
+- `tests/test_step_functions_validation_contract.py`: checks Task type,
+  the existing direct Lambda ARN, `InputPath`, `ResultPath` and `Next`.
+- Historical learner-supplied evidence recorded in `LEARNING-PLAN.md`:
+  focused pytest **1 passed in 0.01s**; full regression **249 passed in 0.22s**;
+  Ruff **All checks passed!**; `git diff --check` reported no errors.
+  These results were not rerun for this documentation update.
+
+**Key learning:** `InputPath` selects Task input; `ResultPath` merges, replaces
+or discards the Task result relative to the original state input; `OutputPath`
+selects the state output. The omitted `OutputPath` defaults to `$`. A direct
+Lambda ARN returns the handler result directly; the optimised `lambda:invoke`
+integration exposes it under `Payload`.
+
+**Limitations and follow-up:** The test checks ASL structure only. It does not
+execute JSON transformations in Step Functions or prove live AWS behaviour.
+Continue distinguishing direct Lambda results from integration envelopes.
+Independent implementation/troubleshooting evidence is not established by
+this structural test alone. No Lesson 41 Choice-state change or Lesson 43
+registry integration is claimed; the registry remains partial.
+
+**Next:** Original Lesson 41 — Choice + validation path.
