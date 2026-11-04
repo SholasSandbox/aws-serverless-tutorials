@@ -249,7 +249,7 @@ def test_confirm_submission_started_success() -> None:
     assert kwargs["ExpressionAttributeValues"][":status"] == "START_CONFIRMED"
 
 
-def test_confirm_submission_started_invalid_transition()-> None:
+def test_confirm_submission_started_invalid_transition() -> None:
     # Simulate ConditionalCheckFailedException and verify that it propagates
 
     table = Mock()
