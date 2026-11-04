@@ -53,8 +53,8 @@ original lesson affected, the reason, what is delayed and where work resumes.
 | 38 | API Lambda → internal workflow contract | **Complete locally** — post-38B input contains normalised trade and idempotency key, not attempt-specific request/correlation IDs |
 | 39 | Lambda → Step Functions `StartExecution` with boto3 | **Complete locally** — injected adapter, stable input, correct start/error contracts; no live AWS |
 | 40 | Step Functions input/output data flow | **Complete locally** — JSONPath Task input/output contract and focused structural test passed; no live AWS execution |
-| 41 | Choice + validation path | **Next** |
-| 42 | Retry/Catch + workflow failure semantics | Planned |
+| 41 | Choice + validation path | **Complete locally** — Choice routing contract verified through a focused structural test; validation-result consistency remains a known limitation |
+| 42 | Retry/Catch + workflow failure semantics | **Next** |
 | 43 | Idempotent workflow starts / duplicate requests | **Partially advanced early** — DynamoDB registry implemented locally, integration/recovery outstanding |
 | 44 | IAM boundary for API Lambda and workflow | Planned |
 | 45 | Controlled AWS deployment of this vertical slice | Planned; explicit approval and cost/cleanup plan required |
@@ -242,7 +242,7 @@ After **every completed lesson**, update both documentation records:
 | Combined S3 and DynamoDB persistence | Partial | Local tested | Deterministic S3 keys and compact workflow responses are tested; real conditional-duplicate handling and live AWS behavior remain unproved |
 | boto3 service boundary | Partial | Local tested | S3 client and DynamoDB resource construction, mocked `PutObject`, conditional `PutItem`, and dependency injection are tested; SDK configuration, realistic `ClientError` classification, and live calls remain open |
 | Repository documentation and governance | Completed | Conceptual | `README.md`, `AGENTS.md`, this plan |
-| Test baseline | Verified | Local tested | Latest learner-supplied Lesson 40 regression: 249 tests passed in 0.22s; focused contract test: 1 passed in 0.01s; Ruff all checks passed; `git diff --check` reported no errors |
+| Test baseline | Verified | Local tested | Latest learner-supplied Lesson 41 regression: 250 tests passed in 0.24s; focused validation contract suite: 2 passed in 0.01s; Ruff lint passed; Ruff format check: 35 files already formatted; `git diff --check` reported no errors |
 | Intentional Git baseline | Completed | Local tested | Repository initialised; `.gitignore` covers `.venv`, caches, bytecode, `.DS_Store`, and `archive/` |
 | Consolidation review | Completed | Local tested | Import order, formatting, trailing whitespace, dead comments, stale README note, and empty archive file resolved in Lesson 27 |
 | Persistence handler boundary hardening | Completed | Local tested | `trade_persistence_handler.py` boundary validation and edge-case tests added in Lesson 28 |
@@ -258,6 +258,7 @@ After **every completed lesson**, update both documentation records:
 | Serverless entry-point selection | Completed | Conceptual | Lesson 36 compares API Gateway, EventBridge, SQS, and direct Step Functions invocation |
 | API-facing vs internal Lambda boundaries | Completed | Conceptual | Lesson 37 separates HTTP translation, internal contracts, retry ownership, identity context, and least privilege |
 | API-to-Step Functions handoff adapter | Completed locally | Local tested | `api_workflow_handoff.py` and `tests/test_api_workflow_handoff.py` verify injected `StartExecution`, retry-stable input/name and honest API responses; not deployed |
+| Step Functions Choice-state routing | Completed locally | Conceptual + Local tested | `tests/test_step_functions_validation_contract.py` verifies Boolean validation routing and Default fallback; inconsistent validation results are not rejected by the current Choice contract |
 | DynamoDB submission registry (partial Lesson 43) | Partial | Local tested | `submission_registry.py` and 11 focused tests cover conditional registration, fingerprint classification and conditional start confirmation; not integrated or deployed |
 | Live tutorial AWS integration | Not started | — | No tutorial resources have been deployed or exercised in AWS |
 
@@ -707,6 +708,55 @@ There is no live AWS execution or deployment. No Lesson 41 Choice-state change
 or Lesson 43 registry integration is claimed. **Next:** original Lesson 41 —
 Choice + validation path.
 
+
+### Lesson 41 — Choice + validation path
+
+Status: **Complete locally (conceptual + local tested)**.
+No live AWS execution.
+
+Evidence:
+
+- `step-functions/trade-validation-with-task.asl.json`
+  contains the existing `IsTradeValid` Choice state.
+- `tests/test_step_functions_validation_contract.py`
+  now verifies the Choice type, both BooleanEquals rules,
+  their routing destinations, their ordering, and the
+  Default fallback.
+- Focused pytest: **2 passed in 0.01s**.
+- Full regression: **250 passed in 0.24s**.
+- Ruff lint: All checks passed.
+- Ruff format check: 35 files already formatted.
+- `git diff --check`: No errors.
+
+Key learning:
+
+- Choice states evaluate conditions in order and follow
+  the first matching rule.
+- BooleanEquals distinguishes Boolean true/false from
+  strings, null and missing values.
+- Default handles inputs that match no Choice rule.
+- Business rejection is distinct from workflow-contract
+  failure.
+- A successful Step Functions execution does not
+  necessarily mean a trade was accepted or persisted.
+
+Known limitation:
+
+- The Choice rules inspect `validation.is_valid` but do
+  not enforce consistency with `validation.error`.
+- A contradictory result such as
+  `{"is_valid": true, "error": "Invalid volume"}`
+  currently routes to AcceptedTrade.
+- The structural test verifies configured routing rules,
+  not actual runtime branch execution.
+- No AWS resources were deployed.
+
+Next: Original Lesson 42 — Retry/Catch + workflow
+failure semantics.
+
+Lesson 43 DynamoDB registry integration remains deferred.
+
+
 ### Early Lesson 43 — DynamoDB registry (not complete)
 
 Status: **Partial, locally tested**. `submission_registry.py` implements
@@ -716,7 +766,7 @@ Learner-supplied terminal evidence: **11 registry tests passed; 249 total
 tests passed**. Commits `a79e5f2` and `b430757` were pushed to `origin/main`.
 No end-to-end duplicate handling, durable execution identity, recovery worker
 or live AWS service guarantees have been demonstrated. Resume this registry
-work at original Lesson 43; the next active lesson is 41.
+work at original Lesson 43; the next active lesson is 42.
 
 ## Parked Topics
 

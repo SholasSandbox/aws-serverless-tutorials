@@ -4,8 +4,7 @@ Last reviewed: 2026-11-03 (Lesson 40 evidence and programme direction reconcilia
 
 Current direction: SAP-C02 has been passed. The programme now builds practical
 Python, AWS serverless and subsequent applied AI competence for employability.
-Historical exam mappings remain reference material. Lesson 40 is complete
-locally; **the next active lesson is 41 — Choice + validation path**.
+Historical exam mappings remain reference material. Lesson 41 is complete locally; **the next active lesson is 42 — Retry/Catch + workflow failure semantics**.
 
 AWS Serverless Demonstrated readiness is assessed separately from AI readiness;
 AI training and Bedrock practice are not prerequisites in this plan. Readiness
@@ -550,4 +549,45 @@ Independent implementation/troubleshooting evidence is not established by
 this structural test alone. No Lesson 41 Choice-state change or Lesson 43
 registry integration is claimed; the registry remains partial.
 
-**Next:** Original Lesson 41 — Choice + validation path.
+*
+### Lesson 41: Choice + validation path
+
+**Status:** Complete locally (conceptual + locally tested);
+no live AWS execution.
+
+**Evidence:**
+
+- Extended `tests/test_step_functions_validation_contract.py`
+  to verify the existing `IsTradeValid` Choice state.
+- Verified the two BooleanEquals rules:
+  - `true` routes to `AcceptedTrade`.
+  - `false` routes to `RejectedTrade`.
+- Verified that unmatched values use the
+  `InvalidWorkflowInput` Default path.
+- Focused tests: 2 passed in 0.01s.
+- Full regression: 250 passed in 0.24s.
+- Ruff lint and formatting checks passed.
+- Git whitespace check reported no errors.
+
+**Key learning:**
+
+Choice states route workflow execution using JSONPath
+conditions. Business validation outcomes must be
+distinguished from malformed or contradictory validation
+responses. A successful workflow execution does not
+necessarily indicate successful business processing.
+
+**Limitation:**
+
+The current Choice rules check `validation.is_valid`
+without checking consistency with `validation.error`.
+A contradictory validation response can therefore
+reach `AcceptedTrade`. The test verifies ASL structure
+rather than executing Choice evaluation in AWS.
+
+No production validation guarantee or live AWS
+execution is claimed.
+
+**Next:** Original Lesson 42 — Retry/Catch +
+workflow failure semantics.
+
