@@ -54,14 +54,14 @@ original lesson affected, the reason, what is delayed and where work resumes.
 | 39 | Lambda → Step Functions `StartExecution` with boto3 | **Complete locally** — injected adapter, stable input, correct start/error contracts; no live AWS |
 | 40 | Step Functions input/output data flow | **Complete locally** — JSONPath Task input/output contract and focused structural test passed; no live AWS execution |
 | 41 | Choice + validation path | **Complete locally** — Choice routing contract verified through a focused structural test; validation-result consistency remains a known limitation |
-| 42 | Retry/Catch + workflow failure semantics | **Next** |
+| 42 | Retry/Catch + workflow failure semantics | **Complete locally** — bounded Retry, Catch and terminal failure contract structurally tested; no live AWS execution |
 | 43 | Idempotent workflow starts / duplicate requests | **Partially advanced early** — DynamoDB registry implemented locally, integration/recovery outstanding |
 | 44 | IAM boundary for API Lambda and workflow | Planned |
 | 45 | Controlled AWS deployment of this vertical slice | Planned; explicit approval and cost/cleanup plan required |
 
 The October "Lesson 39: DynamoDB Submission Registry" was an **out-of-order
 Lesson 43 exercise**, not a replacement for original Lesson 39. The next
-active lesson is **41**. Defer durable exact-input retention, API-registry
+active lesson is **43**. Defer durable exact-input retention, API-registry
 integration, recovery ownership and workers to Lesson 43 or a separately
 approved later exercise.
 
@@ -242,7 +242,7 @@ After **every completed lesson**, update both documentation records:
 | Combined S3 and DynamoDB persistence | Partial | Local tested | Deterministic S3 keys and compact workflow responses are tested; real conditional-duplicate handling and live AWS behavior remain unproved |
 | boto3 service boundary | Partial | Local tested | S3 client and DynamoDB resource construction, mocked `PutObject`, conditional `PutItem`, and dependency injection are tested; SDK configuration, realistic `ClientError` classification, and live calls remain open |
 | Repository documentation and governance | Completed | Conceptual | `README.md`, `AGENTS.md`, this plan |
-| Test baseline | Verified | Local tested | Latest learner-supplied Lesson 41 regression: 250 tests passed in 0.24s; focused validation contract suite: 2 passed in 0.01s; Ruff lint passed; Ruff format check: 35 files already formatted; `git diff --check` reported no errors |
+| Test baseline | Verified | Local tested | Latest learner-supplied Lesson 42 regression: 251 tests passed in 0.22s; Lesson 41 focused validation contract suite: 2 passed in 0.01s; Ruff lint passed; Ruff format check: 36 files already formatted; `git diff --check` reported no errors |
 | Intentional Git baseline | Completed | Local tested | Repository initialised; `.gitignore` covers `.venv`, caches, bytecode, `.DS_Store`, and `archive/` |
 | Consolidation review | Completed | Local tested | Import order, formatting, trailing whitespace, dead comments, stale README note, and empty archive file resolved in Lesson 27 |
 | Persistence handler boundary hardening | Completed | Local tested | `trade_persistence_handler.py` boundary validation and edge-case tests added in Lesson 28 |
@@ -259,6 +259,7 @@ After **every completed lesson**, update both documentation records:
 | API-facing vs internal Lambda boundaries | Completed | Conceptual | Lesson 37 separates HTTP translation, internal contracts, retry ownership, identity context, and least privilege |
 | API-to-Step Functions handoff adapter | Completed locally | Local tested | `api_workflow_handoff.py` and `tests/test_api_workflow_handoff.py` verify injected `StartExecution`, retry-stable input/name and honest API responses; not deployed |
 | Step Functions Choice-state routing | Completed locally | Conceptual + Local tested | `tests/test_step_functions_validation_contract.py` verifies Boolean validation routing and Default fallback; inconsistent validation results are not rejected by the current Choice contract |
+| Step Functions Retry/Catch and workflow failure semantics (Lesson 42) | Complete locally | Conceptual + Local tested | Updated `step-functions/trade-validation-with-retry-catch.asl.json` passes `$.trade` to the validation Lambda and preserves `$.validation`; `tests/test_step_functions_retry_catch_contract.py` verifies input/result paths, bounded Retry, Catch error preservation under `$.validation_error`, and routing to the terminal `ValidationTaskFailed` Fail state; structural test only, no live AWS execution |
 | DynamoDB submission registry (partial Lesson 43) | Partial | Local tested | `submission_registry.py` and 11 focused tests cover conditional registration, fingerprint classification and conditional start confirmation; not integrated or deployed |
 | Live tutorial AWS integration | Not started | — | No tutorial resources have been deployed or exercised in AWS |
 
@@ -708,7 +709,6 @@ There is no live AWS execution or deployment. No Lesson 41 Choice-state change
 or Lesson 43 registry integration is claimed. **Next:** original Lesson 41 —
 Choice + validation path.
 
-
 ### Lesson 41 — Choice + validation path
 
 Status: **Complete locally (conceptual + local tested)**.
@@ -757,6 +757,46 @@ failure semantics.
 Lesson 43 DynamoDB registry integration remains deferred.
 
 
+### Lesson 42 — Retry/Catch + workflow failure semantics
+
+Status: **Complete locally (conceptual + structurally tested)**.
+No live AWS execution.
+
+Evidence:
+
+- Updated `step-functions/trade-validation-with-retry-catch.asl.json`
+  to pass `$.trade` to the validation Lambda.
+- Preserved `ResultPath: $.validation`, bounded Retry,
+  Catch error preservation and terminal failure routing.
+- Added `tests/test_step_functions_retry_catch_contract.py`.
+
+Recorded checks from `learning-summary.md` (not rerun for this
+documentation update):
+
+- Focused pytest: **1 passed in 0.01s**.
+- Full regression: **251 passed in 0.22s**.
+- Ruff lint passed; **36 files already formatted**.
+- `git diff --check`: No errors.
+
+Key learning:
+
+- Business rejection is not a Lambda Task failure.
+- Technical errors require deliberate retry classification.
+- `MaxAttempts` counts retries, not initial executions.
+- Catch can preserve failure context without replacing the workflow input.
+- A terminal Fail state marks a failed execution.
+- A Succeed state does not necessarily mean business acceptance.
+
+Limitations:
+
+Structural tests verify ASL configuration, not runtime execution.
+No live Step Functions retry, recovery, persistence or AWS integration
+behaviour has been demonstrated.
+
+Next: Original Lesson 43 — Idempotent workflow starts / duplicate requests,
+resuming the partial submission registry work.
+
+
 ### Early Lesson 43 — DynamoDB registry (not complete)
 
 Status: **Partial, locally tested**. `submission_registry.py` implements
@@ -766,7 +806,7 @@ Learner-supplied terminal evidence: **11 registry tests passed; 249 total
 tests passed**. Commits `a79e5f2` and `b430757` were pushed to `origin/main`.
 No end-to-end duplicate handling, durable execution identity, recovery worker
 or live AWS service guarantees have been demonstrated. Resume this registry
-work at original Lesson 43; the next active lesson is 42.
+work at original Lesson 43; the next active lesson is 43.
 
 ## Parked Topics
 

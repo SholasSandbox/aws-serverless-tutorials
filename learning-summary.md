@@ -549,7 +549,6 @@ Independent implementation/troubleshooting evidence is not established by
 this structural test alone. No Lesson 41 Choice-state change or Lesson 43
 registry integration is claimed; the registry remains partial.
 
-*
 ### Lesson 41: Choice + validation path
 
 **Status:** Complete locally (conceptual + locally tested);
@@ -588,5 +587,38 @@ rather than executing Choice evaluation in AWS.
 No production validation guarantee or live AWS
 execution is claimed.
 
-**Next:** Original Lesson 42 — Retry/Catch +
-workflow failure semantics.
+### Lesson 42: Retry/Catch + workflow failure semantics
+
+**Status:** Complete locally (conceptual + structurally
+tested); no live AWS execution.
+
+**Evidence:**
+
+- Updated `step-functions/trade-validation-with-retry-catch.asl.json`
+  to pass `$.trade` to the validation Lambda.
+- Preserved `ResultPath: $.validation`, bounded Retry,
+  Catch error preservation and terminal failure routing.
+- Added `tests/test_step_functions_retry_catch_contract.py`.
+- Focused test: 1 passed in 0.01s.
+- Full regression: 251 passed in 0.22s.
+- Ruff lint passed; 36 files already formatted.
+- Git whitespace check reported no errors.
+
+**Key learning:**
+
+- Business rejection is not a Lambda Task failure.
+- Technical errors require deliberate retry classification.
+- MaxAttempts counts retries, not initial executions.
+- Catch can preserve failure context without replacing
+  the workflow input.
+- A terminal Fail state marks a failed execution.
+- A Succeed state does not necessarily mean business acceptance.
+
+**Limitations:**
+
+Structural tests verify ASL configuration, not runtime
+execution. No live Step Functions retry, recovery,
+persistence or AWS integration behaviour has been demonstrated.
+
+**Next:** Lesson 43 — Idempotent workflow starts and
+duplicate requests, resuming the partial submission registry work.
