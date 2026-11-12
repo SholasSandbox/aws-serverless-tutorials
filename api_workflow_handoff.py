@@ -27,6 +27,11 @@ from botocore.exceptions import (
     ReadTimeoutError,
 )
 
+from submission_registry import (
+    classify_existing_submission,
+    fingerprint_normalised_trade,
+    register_submission,
+)
 from trade_validation import (
     REQUIRED_FIELDS,
     find_missing_required_field,
@@ -170,6 +175,47 @@ def start_trade_workflow(
         "execution_arn": response["executionArn"],
         "start_date": response["startDate"],
     }
+
+
+def register_trade_for_handoff(
+    *,
+    table: Any,
+    tenant_id: str,
+    idempotency_key: str,
+    trade: Mapping[str, Any],
+) -> str:
+    """
+    Register a normalized trade submission or classify
+    an existing submission.
+
+    Returns:
+        "CREATED" for a new submission.
+        "MATCH" for an existing submission with identical content.
+        "CONFLICT" for an existing submission with different content.
+    """
+    # trade has already been normalised before reaching the workflow
+    # handoff logic
+    payload_fingerprint = fingerprint_normalised_trade(
+        trade=trade,
+    )
+    submission_status = register_submission(
+        table=table,
+        tenant_id=tenant_id,
+        idempotency_key=idempotency_key,
+        payload_fingerprint=payload_fingerprint,
+    )
+    match submission_status:
+        case "CREATED":
+            return submission_status
+        case "KEY_EXISTS":
+            return classify_existing_submission(
+                table=table,
+                tenant_id=tenant_id,
+                idempotency_key=idempotency_key,
+                payload_fingerprint=payload_fingerprint,
+            )
+        case _:
+            raise ValueError(f"Unexpected submission status: {submission_status!r}.")
 
 
 def json_response(

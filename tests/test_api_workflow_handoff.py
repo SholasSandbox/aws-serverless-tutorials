@@ -5,12 +5,18 @@ import json
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import boto3
+import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
+from moto import mock_aws
 
 from api_workflow_handoff import (
     build_execution_name,
     handle_trade_submission,
+    normalise_trade,
+    register_trade_for_handoff,
 )
+from submission_registry import fingerprint_normalised_trade
 
 STATE_MACHINE_ARN = (
     "arn:aws:states:eu-west-2:123456789012:stateMachine:trade-processing"
@@ -444,3 +450,289 @@ def test_changed_volume_same_key_changes_workflow_input() -> None:
         workflow_a_input["trade"]["trade_id"] == workflow_b_input["trade"]["trade_id"]
     )
     assert workflow_a_input["trade"]["product"] == workflow_b_input["trade"]["product"]
+
+
+@mock_aws
+def test_register_trade_for_handoff_creates_submission():
+
+    dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
+
+    table = dynamodb.create_table(
+        TableName="test-submission-registry",
+        KeySchema=[
+            {"AttributeName": "tenant_id", "KeyType": "HASH"},
+            {"AttributeName": "idempotency_key", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "tenant_id", "AttributeType": "S"},
+            {"AttributeName": "idempotency_key", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
+
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    response = register_trade_for_handoff(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        trade=trade,
+    )
+
+    registered_submission = table.get_item(
+        Key=key,
+        ConsistentRead=True,
+    )["Item"]
+
+    assert response == "CREATED"
+
+    assert registered_submission == {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+        "status": "STARTING",
+    }
+
+
+@mock_aws
+def test_register_trade_for_handoff_matches_duplicate() -> None:
+
+    dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
+    table = dynamodb.create_table(
+        TableName="test-submission-registry",
+        KeySchema=[
+            {"AttributeName": "tenant_id", "KeyType": "HASH"},
+            {"AttributeName": "idempotency_key", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "tenant_id", "AttributeType": "S"},
+            {"AttributeName": "idempotency_key", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
+
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    response = register_trade_for_handoff(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        trade=trade,
+    )
+    assert response == "CREATED"
+    stored_record_before = table.get_item(
+        Key=key,
+        ConsistentRead=True,
+    )["Item"]
+
+    # Second submission with duplicate content should return match
+    response = register_trade_for_handoff(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        trade=trade,
+    )
+    assert response == "MATCH"
+
+    stored_record_after = table.get_item(
+        Key=key,
+        ConsistentRead=True,
+    )["Item"]
+    assert stored_record_before == stored_record_after
+
+
+@mock_aws
+def test_register_trade_for_handoff_rejects_payload_conflict() -> None:
+
+    dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
+    table = dynamodb.create_table(
+        TableName="test-submission-registry",
+        KeySchema=[
+            {"AttributeName": "tenant_id", "KeyType": "HASH"},
+            {"AttributeName": "idempotency_key", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "tenant_id", "AttributeType": "S"},
+            {"AttributeName": "idempotency_key", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    response = register_trade_for_handoff(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        trade=trade,
+    )
+    assert response == "CREATED"
+
+    stored_record_before = table.get_item(
+        Key=key,
+        ConsistentRead=True,
+    )["Item"]
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 30,
+        }
+    )
+
+    # Second submission with different content should return CONFLICT
+    response = register_trade_for_handoff(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        trade=trade,
+    )
+    assert response == "CONFLICT"
+    stored_record_after = table.get_item(
+        Key=key,
+        ConsistentRead=True,
+    )["Item"]
+    assert stored_record_before == stored_record_after
+
+
+@mock_aws
+def test_register_trade_for_handoff_scopes_tenant_identity() -> None:
+
+    dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
+    table = dynamodb.create_table(
+        TableName="test-submission-registry",
+        KeySchema=[
+            {"AttributeName": "tenant_id", "KeyType": "HASH"},
+            {"AttributeName": "idempotency_key", "KeyType": "RANGE"},
+        ],
+        AttributeDefinitions=[
+            {"AttributeName": "tenant_id", "AttributeType": "S"},
+            {"AttributeName": "idempotency_key", "AttributeType": "S"},
+        ],
+        BillingMode="PAY_PER_REQUEST",
+    )
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+    tenant_a_key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+    tenant_a_response = register_trade_for_handoff(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        trade=trade,
+    )
+    assert tenant_a_response == "CREATED"
+
+    tenant_a_submission = table.get_item(
+        Key=tenant_a_key,
+        ConsistentRead=True,
+    )["Item"]
+
+    assert tenant_a_submission == {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+        "status": "STARTING",
+    }
+
+    tenant_b_key = {
+        "tenant_id": "TENANT-B",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    # Two different tenants can each register the same idempotency key
+    tenant_b_response = register_trade_for_handoff(
+        table=table,
+        tenant_id="TENANT-B",
+        idempotency_key="SUBMISSION-1001",
+        trade=trade,
+    )
+    assert tenant_b_response == "CREATED"
+
+    tenant_b_submission = table.get_item(
+        Key=tenant_b_key,
+        ConsistentRead=True,
+    )["Item"]
+
+    assert tenant_b_submission == {
+        "tenant_id": "TENANT-B",
+        "idempotency_key": "SUBMISSION-1001",
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+        "status": "STARTING",
+    }
+
+
+def test_register_trade_for_handoff_propagates_dynamodb_error() -> None:
+    table = Mock()
+    error = table.put_item.side_effect = ClientError(
+        {
+            "Error": {
+                "Code": "AccessDeniedException",
+                "Message": "Access denied",
+            }
+        },
+        "put_item",
+    )
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    with pytest.raises(
+        ClientError,
+        match="AccessDeniedException",
+    ) as exc_info:
+        register_trade_for_handoff(
+            table=table,
+            tenant_id="TENANT-A",
+            idempotency_key="SUBMISSION-1001",
+            trade=trade,
+        )
+
+    assert exc_info.value is error
+    table.put_item.assert_called_once()
