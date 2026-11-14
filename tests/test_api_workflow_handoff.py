@@ -11,6 +11,7 @@ from botocore.exceptions import ClientError, EndpointConnectionError
 
 from api_workflow_handoff import (
     build_execution_name,
+    extract_authenticated_tenant_id,
     handle_trade_submission,
     normalise_trade,
     register_and_claim_initial_submission,
@@ -1078,3 +1079,132 @@ def test_register_and_claim_initial_submission_registration_failure_skips_lease(
     table.put_item.assert_called_once()
     table.get_item.assert_not_called()
     table.update_item.assert_not_called()  # lease acquisition attempt was skipped
+
+
+def test_extract_authenticated_tenant_id_from_jwt_claims() -> None:
+
+    event = {
+        "requestContext": {
+            "requestId": "REQ-123",
+            "authorizer": {
+                "jwt": {
+                    "claims": {
+                        "tenant_id": "TENANT-A",
+                    },
+                    "scopes": ["trades:submit"],
+                },
+            },
+        },
+    }
+    tenant_id = extract_authenticated_tenant_id(event=event)
+
+    assert tenant_id == "TENANT-A"
+
+
+def test_extract_authenticated_tenant_id_rejects_missing_claims() -> None:
+
+    event = {
+        "requestContext": {
+            "requestId": "REQ-123",
+            "authorizer": {
+                "jwt": {
+                    "invalid-claims": {
+                        "tenant_id": "TENANT-A",
+                    },
+                    "scopes": ["trades:submit"],
+                },
+            },
+        },
+    }
+
+    with pytest.raises(
+        ValueError, match="JWT authorizer claims are missing or invalid."
+    ):
+        extract_authenticated_tenant_id(event=event)
+
+
+@pytest.mark.parametrize(
+    "tenant_id",
+    [
+        pytest.param(None, id="null"),
+        pytest.param("", id="empty"),
+        pytest.param("   ", id="whitespace"),
+        pytest.param(123, id="integer"),
+        pytest.param(False, id="boolean"),
+        pytest.param([], id="list"),
+        pytest.param({}, id="dictionary"),
+    ],
+)
+def test_extract_authenticated_tenant_id_rejects_invalid_tenant(
+    tenant_id: object,
+) -> None:
+    event = {
+        "requestContext": {
+            "requestId": "REQ-123",
+            "authorizer": {
+                "jwt": {
+                    "claims": {
+                        "tenant_id": tenant_id,
+                    },
+                    "scopes": ["trades:submit"],
+                },
+            },
+        },
+    }
+    with pytest.raises(
+        ValueError,
+        match=r"^Authenticated tenant ID is missing or invalid\.$",
+    ):
+        extract_authenticated_tenant_id(event=event)
+
+
+def test_extract_authenticated_tenant_id_ignores_untrusted_header() -> None:
+    event = {
+        "headers": {
+            "x-tenant-id": "TENANT-FROM-HEADER",
+        },
+        "requestContext": {
+            "authorizer": {
+                "jwt": {
+                    "claims": {},
+                },
+            },
+        },
+    }
+
+    with pytest.raises(
+        ValueError,
+        match=r"^Authenticated tenant ID is missing or invalid\.$",
+    ):
+        extract_authenticated_tenant_id(event=event)
+
+
+def test_extract_authenticated_tenant_id_prefers_jwt_claim_over_header() -> None:
+    event = {
+        "headers": {
+            "x-tenant-id": "TENANT-FROM-HEADER",
+        },
+        "requestContext": {
+            "authorizer": {
+                "jwt": {"claims": {"tenant_id": "TENANT-A"}},
+            },
+        },
+    }
+
+    tenant_id = extract_authenticated_tenant_id(event=event)
+
+    assert tenant_id == "TENANT-A"
+
+
+def test_extract_authenticated_tenant_id_rejects_malformed_event_structure() -> None:
+    event = {
+        "requestContext": {
+            "authorizer": "not-a-dictionary",
+        }
+    }
+
+    with pytest.raises(
+        ValueError,
+        match=r"^JWT authorizer context is missing or invalid\.$",
+    ):
+        extract_authenticated_tenant_id(event=event)

@@ -429,3 +429,35 @@ def register_and_claim_initial_submission(
         return registered_status
 
     raise ValueError(f"Unexpected registration status: {registered_status!r}.")
+
+
+def extract_authenticated_tenant_id(
+    event: Mapping[str, Any],
+) -> str:
+    """
+    Extract tenant identity from an API Gateway
+    HTTP API JWT authorizer context.
+
+    Raises ValueError when trusted tenant
+    identity is unavailable or invalid.
+    """
+    # ----------------------------------------------------------------
+    # 1. Safely access the JWT authorizer block
+    # ----------------------------------------------------------------
+
+    current: Any = event
+
+    for key in ("requestContext", "authorizer", "jwt", "claims"):
+        if not isinstance(current, Mapping):
+            raise ValueError("JWT authorizer context is missing or invalid.")
+        current = current.get(key)
+
+    if not isinstance(current, Mapping):
+        raise ValueError("JWT authorizer claims are missing or invalid.")
+
+    tenant_id = current.get("tenant_id")  # Generic / Auth0 namespace claim
+
+    if not isinstance(tenant_id, str) or not tenant_id.strip():
+        raise ValueError("Authenticated tenant ID is missing or invalid.")
+
+    return tenant_id
