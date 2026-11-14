@@ -24,6 +24,9 @@ def register_submission(
     tenant_id: str,
     idempotency_key: str,
     payload_fingerprint: str,
+    recovery_token: str,
+    lease_expires_at: int,
+    now: int,
 ) -> str:
     """
     Register a new submission using a DynamoDB conditional write.
@@ -34,12 +37,24 @@ def register_submission(
 
     Other DynamoDB errors must propagate.
     """
-    # Your implementation
+
+    if not isinstance(recovery_token, str) or not recovery_token.strip():
+        raise ValueError("recovery_token must be a non-empty string.")
+
+    if (
+        type(now) is not int
+        or type(lease_expires_at) is not int
+        or lease_expires_at <= now
+    ):
+        raise ValueError("lease_expires_at must be an integer greater than now.")
+
     submission_record = {
         "tenant_id": tenant_id,
         "idempotency_key": idempotency_key,
         "payload_fingerprint": payload_fingerprint,
         "status": "STARTING",
+        "recovery_token": recovery_token,
+        "lease_expires_at": lease_expires_at,
     }
 
     try:
@@ -177,7 +192,7 @@ def get_submission_record(
             raise ValueError(f"Expected START_CONFIRMED or STARTING, got {status!r}.")
 
 
-def claim_submission_recovery(
+def acquire_submission_lease(
     table,
     tenant_id: str,
     idempotency_key: str,

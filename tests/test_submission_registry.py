@@ -1,14 +1,12 @@
 from unittest.mock import Mock
 
-import boto3
 import pytest
 from boto3.dynamodb.conditions import Attr
 from botocore.exceptions import ClientError
-from moto import mock_aws
 
 from api_workflow_handoff import normalise_trade
 from submission_registry import (
-    claim_submission_recovery,
+    acquire_submission_lease,
     classify_existing_submission,
     confirm_submission_started,
     fingerprint_normalised_trade,
@@ -18,13 +16,20 @@ from submission_registry import (
 
 
 def test_register_submission_created() -> None:
+
     table = Mock()
+
+    TEST_LEASE = {
+        "recovery_token": "test-token-001",
+        "lease_expires_at": 200,
+    }
 
     submission_record = {
         "tenant_id": "TENANT-A",
         "idempotency_key": "SUBMISSION-1001",
         "payload_fingerprint": "<sha256-hex-digest>",
         "status": "STARTING",
+        **TEST_LEASE,
     }
 
     response = register_submission(
@@ -32,6 +37,8 @@ def test_register_submission_created() -> None:
         tenant_id=submission_record["tenant_id"],
         idempotency_key=submission_record["idempotency_key"],
         payload_fingerprint=submission_record["payload_fingerprint"],
+        **TEST_LEASE,
+        now=100,
     )
 
     assert response == "CREATED"
@@ -57,17 +64,25 @@ def test_register_submission_key_exists() -> None:
         "put_item",
     )
 
+    TEST_LEASE = {
+        "recovery_token": "test-token-001",
+        "lease_expires_at": 200,
+    }
+
     submission_record = {
         "tenant_id": "TENANT-A",
         "idempotency_key": "SUBMISSION-1001",
         "payload_fingerprint": "<sha256-hex-digest>",
         "status": "STARTING",
+        **TEST_LEASE,
     }
     response = register_submission(
         table=table,
         tenant_id=submission_record["tenant_id"],
         idempotency_key=submission_record["idempotency_key"],
         payload_fingerprint=submission_record["payload_fingerprint"],
+        now=100,
+        **TEST_LEASE,
     )
 
     assert response == "KEY_EXISTS"
@@ -75,7 +90,14 @@ def test_register_submission_key_exists() -> None:
 
 
 def test_register_submission_other_client_error() -> None:
+
     table = Mock()
+
+    TEST_LEASE = {
+        "recovery_token": "test-token-001",
+        "lease_expires_at": 200,
+    }
+
     error = ClientError(
         {
             "Error": {
@@ -93,6 +115,8 @@ def test_register_submission_other_client_error() -> None:
             tenant_id="TENANT-A",
             idempotency_key="SUBMISSION-1001",
             payload_fingerprint="<sha256-hex-digest>",
+            now=100,
+            **TEST_LEASE,
         )
 
     assert exc_info.value is error
@@ -168,11 +192,11 @@ def test_classify_existing_submission_not_found() -> None:
     table.get_item.assert_called()
 
 
-def test_claim_submission_recovery_uses_atomic_lease_condition() -> None:
+def test_acquire_submission_lease_uses_atomic_lease_condition() -> None:
     """Check the claim request; the mock does not evaluate DynamoDB conditions."""
     table = Mock()
 
-    claim_submission_recovery(
+    acquire_submission_lease(
         table=table,
         tenant_id="TENANT-A",
         idempotency_key="SUBMISSION-1001",
@@ -536,10 +560,10 @@ def test_get_submission_record_confirmed_without_arn_raises_value_error() -> Non
     table.get_item.assert_called()
 
 
-def test_claim_submission_recovery_success_returns_claimed() -> None:
+def test_acquire_submission_lease_success_returns_claimed() -> None:
     table = Mock()
 
-    response = claim_submission_recovery(
+    response = acquire_submission_lease(
         table=table,
         tenant_id="TENANT-A",
         idempotency_key="SUBMISSION-1001",
@@ -578,23 +602,11 @@ def test_claim_submission_recovery_success_returns_claimed() -> None:
     }
 
 
-@mock_aws
-def test_claim_submission_recovery_expired_lease_allows_new_owner() -> None:
+def test_acquire_submission_lease_expired_lease_allows_new_owner(
+    submission_table,
+) -> None:
 
-    dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
-
-    table = dynamodb.create_table(
-        TableName="test-submission-registry",
-        KeySchema=[
-            {"AttributeName": "tenant_id", "KeyType": "HASH"},
-            {"AttributeName": "idempotency_key", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "tenant_id", "AttributeType": "S"},
-            {"AttributeName": "idempotency_key", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+    table = submission_table
 
     key = {
         "tenant_id": "TENANT-A",
@@ -612,7 +624,7 @@ def test_claim_submission_recovery_expired_lease_allows_new_owner() -> None:
     )
 
     # Act: acquire ownership at time 100 with a new lease.
-    response = claim_submission_recovery(
+    response = acquire_submission_lease(
         table=table,
         tenant_id="TENANT-A",
         idempotency_key="SUBMISSION-1001",
@@ -636,7 +648,7 @@ def test_claim_submission_recovery_expired_lease_allows_new_owner() -> None:
     }
 
 
-def test_claim_submission_recovery_propagates_conditional_failure() -> None:
+def test_acquire_submission_lease_propagates_conditional_failure() -> None:
     table = Mock()
     table.update_item.side_effect = ClientError(
         {
@@ -648,7 +660,7 @@ def test_claim_submission_recovery_propagates_conditional_failure() -> None:
         "update_item",
     )
     with pytest.raises(ClientError) as exc_info:
-        claim_submission_recovery(
+        acquire_submission_lease(
             table=table,
             tenant_id="TENANT-A",
             idempotency_key="SUBMISSION-1001",
@@ -663,14 +675,14 @@ def test_claim_submission_recovery_propagates_conditional_failure() -> None:
 
 
 @pytest.mark.parametrize("lease_expires_at", [99, 100, 999, 1000])
-def test_claim_submission_recovery_invalid_lease(lease_expires_at) -> None:
+def test_acquire_submission_lease_invalid_lease(lease_expires_at) -> None:
     table = Mock()
 
     with pytest.raises(
         ValueError,
         match=r"^lease_expires_at must be later than now\.$",
     ):
-        claim_submission_recovery(
+        acquire_submission_lease(
             table=table,
             tenant_id="TENANT-A",
             idempotency_key="SUBMISSION-1001",
@@ -683,7 +695,7 @@ def test_claim_submission_recovery_invalid_lease(lease_expires_at) -> None:
 
 
 @pytest.mark.parametrize("recovery_token", ["", None, "   ", 123])
-def test_claim_submission_recovery_invalid_token(recovery_token) -> None:
+def test_acquire_submission_lease_invalid_token(recovery_token) -> None:
     table = Mock()
 
     with pytest.raises(
@@ -693,7 +705,7 @@ def test_claim_submission_recovery_invalid_token(recovery_token) -> None:
             r"non-empty recovery token string\.$"
         ),
     ):
-        claim_submission_recovery(
+        acquire_submission_lease(
             table=table,
             tenant_id="TENANT-A",
             idempotency_key="SUBMISSION-1001",
@@ -705,23 +717,11 @@ def test_claim_submission_recovery_invalid_token(recovery_token) -> None:
     table.update_item.assert_not_called()
 
 
-@mock_aws
-def test_claim_submission_recovery_active_lease_preserves_owner() -> None:
+def test_acquire_submission_lease_active_lease_preserves_owner(
+    submission_table,
+) -> None:
 
-    dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
-
-    table = dynamodb.create_table(
-        TableName="test-submission-registry",
-        KeySchema=[
-            {"AttributeName": "tenant_id", "KeyType": "HASH"},
-            {"AttributeName": "idempotency_key", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "tenant_id", "AttributeType": "S"},
-            {"AttributeName": "idempotency_key", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+    table = submission_table
 
     key = {
         "tenant_id": "TENANT-A",
@@ -738,7 +738,7 @@ def test_claim_submission_recovery_active_lease_preserves_owner() -> None:
     table.put_item(Item=original_record)
 
     with pytest.raises(ClientError) as exc_info:
-        claim_submission_recovery(
+        acquire_submission_lease(
             table=table,
             tenant_id="TENANT-A",
             idempotency_key="SUBMISSION-1001",
@@ -757,22 +757,8 @@ def test_claim_submission_recovery_active_lease_preserves_owner() -> None:
     assert stored_record == original_record
 
 
-@mock_aws
-def test_confirm_submission_started_rejects_stale_owner() -> None:
-    dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
-
-    table = dynamodb.create_table(
-        TableName="test-submission-registry",
-        KeySchema=[
-            {"AttributeName": "tenant_id", "KeyType": "HASH"},
-            {"AttributeName": "idempotency_key", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "tenant_id", "AttributeType": "S"},
-            {"AttributeName": "idempotency_key", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+def test_confirm_submission_started_rejects_stale_owner(submission_table) -> None:
+    table = submission_table
 
     key = {
         "tenant_id": "TENANT-A",
@@ -809,22 +795,8 @@ def test_confirm_submission_started_rejects_stale_owner() -> None:
     assert stored_record == original_record
 
 
-@mock_aws
-def test_confirm_submission_started_accepts_current_owner() -> None:
-    dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
-
-    table = dynamodb.create_table(
-        TableName="test-submission-registry",
-        KeySchema=[
-            {"AttributeName": "tenant_id", "KeyType": "HASH"},
-            {"AttributeName": "idempotency_key", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "tenant_id", "AttributeType": "S"},
-            {"AttributeName": "idempotency_key", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+def test_confirm_submission_started_accepts_current_owner(submission_table) -> None:
+    table = submission_table
 
     key = {
         "tenant_id": "TENANT-A",
@@ -867,22 +839,8 @@ def test_confirm_submission_started_accepts_current_owner() -> None:
     }
 
 
-@mock_aws
-def test_confirm_submission_started_rejects_expired_owner() -> None:
-    dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
-
-    table = dynamodb.create_table(
-        TableName="test-submission-registry",
-        KeySchema=[
-            {"AttributeName": "tenant_id", "KeyType": "HASH"},
-            {"AttributeName": "idempotency_key", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "tenant_id", "AttributeType": "S"},
-            {"AttributeName": "idempotency_key", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+def test_confirm_submission_started_rejects_expired_owner(submission_table) -> None:
+    table = submission_table
 
     key = {
         "tenant_id": "TENANT-A",
@@ -918,22 +876,8 @@ def test_confirm_submission_started_rejects_expired_owner() -> None:
     assert stored_record == original_record
 
 
-@mock_aws
-def test_confirm_submission_started_rejects_unowned_record() -> None:
-    dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
-
-    table = dynamodb.create_table(
-        TableName="test-submission-registry",
-        KeySchema=[
-            {"AttributeName": "tenant_id", "KeyType": "HASH"},
-            {"AttributeName": "idempotency_key", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "tenant_id", "AttributeType": "S"},
-            {"AttributeName": "idempotency_key", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+def test_confirm_submission_started_rejects_unowned_record(submission_table) -> None:
+    table = submission_table
 
     key = {
         "tenant_id": "TENANT-A",
@@ -966,3 +910,49 @@ def test_confirm_submission_started_rejects_unowned_record() -> None:
     )["Item"]
 
     assert stored_record == original_record
+
+
+TOKEN_ERROR = "recovery_token must be a non-empty string."
+LEASE_ERROR = "lease_expires_at must be an integer greater than now."
+
+
+@pytest.mark.parametrize(
+    "recovery_token, lease_expires_at, now, expected_message",
+    [
+        ("", 200, 100, TOKEN_ERROR),
+        ("   ", 200, 100, TOKEN_ERROR),
+        (None, 200, 100, TOKEN_ERROR),
+        ("valid-token", 100, 100, LEASE_ERROR),
+        ("valid-token", 99, 100, LEASE_ERROR),
+    ],
+)
+def test_register_submission_rejects_invalid_initial_lease(
+    recovery_token,
+    lease_expires_at,
+    now,
+    expected_message,
+) -> None:
+    table = Mock()
+
+    submission_record = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+        "payload_fingerprint": "<sha256-hex-digest>",
+        "status": "STARTING",
+    }
+
+    with pytest.raises(
+        ValueError,
+    ) as exc_info:
+        register_submission(
+            table=table,
+            tenant_id=submission_record["tenant_id"],
+            idempotency_key=submission_record["idempotency_key"],
+            payload_fingerprint=submission_record["payload_fingerprint"],
+            recovery_token=recovery_token,
+            lease_expires_at=lease_expires_at,
+            now=now,
+        )
+
+    assert str(exc_info.value) == expected_message
+    table.put_item.assert_not_called()

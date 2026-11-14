@@ -2,18 +2,18 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-import boto3
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
-from moto import mock_aws
 
 from api_workflow_handoff import (
     build_execution_name,
     handle_trade_submission,
     normalise_trade,
+    register_and_claim_initial_submission,
     register_trade_for_handoff,
 )
 from submission_registry import fingerprint_normalised_trade
@@ -55,13 +55,14 @@ def test_valid_request_starts_workflow_with_normalised_input() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     assert response["statusCode"] == 202
 
     call = client.start_execution.call_args.kwargs
     assert call["stateMachineArn"] == STATE_MACHINE_ARN
-    assert call["name"] == build_execution_name("submission-001")
+    assert call["name"] == build_execution_name("TENANT-A", "submission-001")
     assert json.loads(call["input"]) == {
         "trade": {
             "trade_id": "TRD-1001",
@@ -86,6 +87,7 @@ def test_valid_request_returns_truthful_accepted_response() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     body = json.loads(response["body"])
@@ -102,6 +104,7 @@ def test_invalid_json_returns_400_without_starting_workflow() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     assert response["statusCode"] == 400
@@ -116,6 +119,7 @@ def test_non_object_json_returns_400_without_starting_workflow() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     assert response["statusCode"] == 400
@@ -140,6 +144,7 @@ def test_base64_encoded_json_body_is_decoded_before_workflow_start() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     assert response["statusCode"] == 202
@@ -153,6 +158,7 @@ def test_missing_trade_field_returns_400_without_starting_workflow() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     assert response["statusCode"] == 400
@@ -177,6 +183,7 @@ def test_external_fields_are_not_passed_to_workflow() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     assert response["statusCode"] == 202
@@ -192,6 +199,7 @@ def test_missing_idempotency_key_returns_400() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     assert response["statusCode"] == 400
@@ -215,6 +223,7 @@ def test_retryable_step_functions_failure_returns_503_not_202() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     body = json.loads(response["body"])
@@ -240,6 +249,7 @@ def test_duplicate_execution_name_returns_client_safe_409() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     assert response["statusCode"] == 409
@@ -263,6 +273,7 @@ def test_permission_failure_returns_500_without_leaking_aws_details() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     assert response["statusCode"] == 500
@@ -280,6 +291,7 @@ def test_connection_failure_returns_503_without_leaking_endpoint() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     assert response["statusCode"] == 503
@@ -295,6 +307,7 @@ def test_unexpected_start_failure_returns_500_without_leaking_details() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     assert response["statusCode"] == 500
@@ -309,18 +322,101 @@ def test_missing_state_machine_configuration_returns_500_without_sdk_call() -> N
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn="",
+        tenant_id="TENANT-A",
     )
 
     assert response["statusCode"] == 500
     client.start_execution.assert_not_called()
 
 
-def test_execution_name_is_stable_for_same_idempotency_key() -> None:
-    assert build_execution_name("submission-001") == build_execution_name(
-        "submission-001"
+def test_execution_name_is_stable_for_same_tenant_and_key() -> None:
+    """Same inputs produce the same name"""
+    first = build_execution_name("TENANT-A", "submission-001")
+    repeated = build_execution_name("TENANT-A", "submission-001")
+
+    assert first == repeated
+
+
+def test_execution_name_differs_across_tenants() -> None:
+    """Same key, different tenants produce different names"""
+    first = build_execution_name("TENANT-A", "submission-001")
+    different_tenant = build_execution_name("TENANT-B", "submission-001")
+
+    assert first != different_tenant
+
+
+def test_execution_name_differs_across_keys() -> None:
+    """Same tenant, different keys produce different names"""
+    first = build_execution_name("TENANT-A", "submission-001")
+    different_key = build_execution_name("TENANT-A", "submission-002")
+
+    assert first != different_key
+
+
+@pytest.mark.parametrize(
+    "first_tenant, first_key, second_tenant, second_key",
+    [
+        pytest.param(
+            "AB",
+            "C",
+            "A",
+            "BC",
+            id="ambiguous-concatenation",
+        ),
+        pytest.param(
+            "A:B",
+            "C",
+            "A",
+            "B:C",
+            id="ambiguous-colon-separator",
+        ),
+    ],
+)
+def test_execution_name_avoids_ambiguous_identity_concatenation(
+    first_tenant: str,
+    first_key: str,
+    second_tenant: str,
+    second_key: str,
+) -> None:
+    # ("AB", "C") and ("A", "BC") produce different names
+    first = build_execution_name(first_tenant, first_key)
+    second = build_execution_name(second_tenant, second_key)
+
+    assert first != second
+
+
+@pytest.mark.parametrize(
+    "tenant_id, idempotency_key",
+    [
+        ("TENANT-A", "submission-001"),
+        ("TENANT A", "submission * ? [001]"),
+        ("TENANT-東京", "soumission-énergie"),
+        ("TENANT\nA", "submission\x00\x7f"),
+        ("T" * 200, "K" * 200),
+    ],
+)
+def test_execution_name_is_step_functions_compatible(
+    tenant_id: str,
+    idempotency_key: str,
+) -> None:
+    execution_name = build_execution_name(
+        tenant_id,
+        idempotency_key,
     )
-    assert build_execution_name("submission-001") != build_execution_name(
-        "submission-002"
+
+    # AWS execution names must contain 1–80 characters.
+    assert 1 <= len(execution_name) <= 80
+
+    # Restrict names to ASCII for CloudWatch compatibility.
+    assert execution_name.isascii()
+
+    # Enforce our application's stricter naming convention.
+    assert (
+        re.fullmatch(
+            r"trade-submit-[0-9a-f]{24}",
+            execution_name,
+        )
+        is not None
     )
 
 
@@ -348,6 +444,7 @@ def test_retry_with_same_idempotency_key_has_stable_workflow_input() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-788"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     handle_trade_submission(
@@ -359,6 +456,7 @@ def test_retry_with_same_idempotency_key_has_stable_workflow_input() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     assert client.start_execution.call_count == 2
@@ -368,7 +466,7 @@ def test_retry_with_same_idempotency_key_has_stable_workflow_input() -> None:
     first_call = calls[0].kwargs
     second_call = calls[1].kwargs
 
-    expected_execution_name = build_execution_name("SUBMISSION-1001")
+    expected_execution_name = build_execution_name("TENANT-A", "SUBMISSION-1001")
 
     assert first_call["name"] == expected_execution_name
     assert first_call["name"] == second_call["name"]
@@ -406,6 +504,7 @@ def test_changed_volume_same_key_changes_workflow_input() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-788"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     request_body_b = json.dumps(
@@ -425,6 +524,7 @@ def test_changed_volume_same_key_changes_workflow_input() -> None:
         SimpleNamespace(aws_request_id="LAMBDA-789"),
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
     )
 
     assert client.start_execution.call_count == 2
@@ -434,7 +534,7 @@ def test_changed_volume_same_key_changes_workflow_input() -> None:
     first_call = calls[0].kwargs
     second_call = calls[1].kwargs
 
-    expected_execution_name = build_execution_name("SUBMISSION-1001")
+    expected_execution_name = build_execution_name("TENANT-A", "SUBMISSION-1001")
 
     assert first_call["name"] == expected_execution_name
     assert first_call["name"] == second_call["name"]
@@ -452,23 +552,9 @@ def test_changed_volume_same_key_changes_workflow_input() -> None:
     assert workflow_a_input["trade"]["product"] == workflow_b_input["trade"]["product"]
 
 
-@mock_aws
-def test_register_trade_for_handoff_creates_submission():
+def test_register_trade_for_handoff_creates_submission(submission_table):
 
-    dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
-
-    table = dynamodb.create_table(
-        TableName="test-submission-registry",
-        KeySchema=[
-            {"AttributeName": "tenant_id", "KeyType": "HASH"},
-            {"AttributeName": "idempotency_key", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "tenant_id", "AttributeType": "S"},
-            {"AttributeName": "idempotency_key", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+    table = submission_table
 
     key = {
         "tenant_id": "TENANT-A",
@@ -482,12 +568,18 @@ def test_register_trade_for_handoff_creates_submission():
             "volume_mwh": 25,
         }
     )
+    TEST_LEASE = {
+        "recovery_token": "test-token-001",
+        "lease_expires_at": 200,
+    }
 
     response = register_trade_for_handoff(
         table=table,
         tenant_id="TENANT-A",
         idempotency_key="SUBMISSION-1001",
         trade=trade,
+        **TEST_LEASE,
+        now=100,
     )
 
     registered_submission = table.get_item(
@@ -502,25 +594,13 @@ def test_register_trade_for_handoff_creates_submission():
         "idempotency_key": "SUBMISSION-1001",
         "payload_fingerprint": fingerprint_normalised_trade(trade),
         "status": "STARTING",
+        **TEST_LEASE,
     }
 
 
-@mock_aws
-def test_register_trade_for_handoff_matches_duplicate() -> None:
+def test_register_trade_for_handoff_matches_duplicate(submission_table) -> None:
 
-    dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
-    table = dynamodb.create_table(
-        TableName="test-submission-registry",
-        KeySchema=[
-            {"AttributeName": "tenant_id", "KeyType": "HASH"},
-            {"AttributeName": "idempotency_key", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "tenant_id", "AttributeType": "S"},
-            {"AttributeName": "idempotency_key", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+    table = submission_table
 
     key = {
         "tenant_id": "TENANT-A",
@@ -535,11 +615,18 @@ def test_register_trade_for_handoff_matches_duplicate() -> None:
         }
     )
 
+    TEST_LEASE = {
+        "recovery_token": "test-token-001",
+        "lease_expires_at": 200,
+    }
+
     response = register_trade_for_handoff(
         table=table,
         tenant_id="TENANT-A",
         idempotency_key="SUBMISSION-1001",
         trade=trade,
+        now=100,
+        **TEST_LEASE,
     )
     assert response == "CREATED"
     stored_record_before = table.get_item(
@@ -553,6 +640,8 @@ def test_register_trade_for_handoff_matches_duplicate() -> None:
         tenant_id="TENANT-A",
         idempotency_key="SUBMISSION-1001",
         trade=trade,
+        now=100,
+        **TEST_LEASE,
     )
     assert response == "MATCH"
 
@@ -563,22 +652,9 @@ def test_register_trade_for_handoff_matches_duplicate() -> None:
     assert stored_record_before == stored_record_after
 
 
-@mock_aws
-def test_register_trade_for_handoff_rejects_payload_conflict() -> None:
+def test_register_trade_for_handoff_rejects_payload_conflict(submission_table) -> None:
 
-    dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
-    table = dynamodb.create_table(
-        TableName="test-submission-registry",
-        KeySchema=[
-            {"AttributeName": "tenant_id", "KeyType": "HASH"},
-            {"AttributeName": "idempotency_key", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "tenant_id", "AttributeType": "S"},
-            {"AttributeName": "idempotency_key", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+    table = submission_table
     key = {
         "tenant_id": "TENANT-A",
         "idempotency_key": "SUBMISSION-1001",
@@ -592,11 +668,18 @@ def test_register_trade_for_handoff_rejects_payload_conflict() -> None:
         }
     )
 
+    TEST_LEASE = {
+        "recovery_token": "test-token-001",
+        "lease_expires_at": 200,
+    }
+
     response = register_trade_for_handoff(
         table=table,
         tenant_id="TENANT-A",
         idempotency_key="SUBMISSION-1001",
         trade=trade,
+        now=100,
+        **TEST_LEASE,
     )
     assert response == "CREATED"
 
@@ -619,6 +702,8 @@ def test_register_trade_for_handoff_rejects_payload_conflict() -> None:
         tenant_id="TENANT-A",
         idempotency_key="SUBMISSION-1001",
         trade=trade,
+        now=100,
+        **TEST_LEASE,
     )
     assert response == "CONFLICT"
     stored_record_after = table.get_item(
@@ -628,22 +713,9 @@ def test_register_trade_for_handoff_rejects_payload_conflict() -> None:
     assert stored_record_before == stored_record_after
 
 
-@mock_aws
-def test_register_trade_for_handoff_scopes_tenant_identity() -> None:
+def test_register_trade_for_handoff_scopes_tenant_identity(submission_table) -> None:
 
-    dynamodb = boto3.resource("dynamodb", region_name="eu-west-2")
-    table = dynamodb.create_table(
-        TableName="test-submission-registry",
-        KeySchema=[
-            {"AttributeName": "tenant_id", "KeyType": "HASH"},
-            {"AttributeName": "idempotency_key", "KeyType": "RANGE"},
-        ],
-        AttributeDefinitions=[
-            {"AttributeName": "tenant_id", "AttributeType": "S"},
-            {"AttributeName": "idempotency_key", "AttributeType": "S"},
-        ],
-        BillingMode="PAY_PER_REQUEST",
-    )
+    table = submission_table
 
     trade = normalise_trade(
         {
@@ -652,6 +724,12 @@ def test_register_trade_for_handoff_scopes_tenant_identity() -> None:
             "volume_mwh": 25,
         }
     )
+
+    TEST_LEASE = {
+        "recovery_token": "test-token-001",
+        "lease_expires_at": 200,
+    }
+
     tenant_a_key = {
         "tenant_id": "TENANT-A",
         "idempotency_key": "SUBMISSION-1001",
@@ -661,6 +739,8 @@ def test_register_trade_for_handoff_scopes_tenant_identity() -> None:
         tenant_id="TENANT-A",
         idempotency_key="SUBMISSION-1001",
         trade=trade,
+        now=100,
+        **TEST_LEASE,
     )
     assert tenant_a_response == "CREATED"
 
@@ -674,6 +754,7 @@ def test_register_trade_for_handoff_scopes_tenant_identity() -> None:
         "idempotency_key": "SUBMISSION-1001",
         "payload_fingerprint": fingerprint_normalised_trade(trade),
         "status": "STARTING",
+        **TEST_LEASE,
     }
 
     tenant_b_key = {
@@ -687,6 +768,8 @@ def test_register_trade_for_handoff_scopes_tenant_identity() -> None:
         tenant_id="TENANT-B",
         idempotency_key="SUBMISSION-1001",
         trade=trade,
+        now=100,
+        **TEST_LEASE,
     )
     assert tenant_b_response == "CREATED"
 
@@ -700,6 +783,7 @@ def test_register_trade_for_handoff_scopes_tenant_identity() -> None:
         "idempotency_key": "SUBMISSION-1001",
         "payload_fingerprint": fingerprint_normalised_trade(trade),
         "status": "STARTING",
+        **TEST_LEASE,
     }
 
 
@@ -723,6 +807,11 @@ def test_register_trade_for_handoff_propagates_dynamodb_error() -> None:
         }
     )
 
+    TEST_LEASE = {
+        "recovery_token": "test-token-001",
+        "lease_expires_at": 200,
+    }
+
     with pytest.raises(
         ClientError,
         match="AccessDeniedException",
@@ -732,7 +821,260 @@ def test_register_trade_for_handoff_propagates_dynamodb_error() -> None:
             tenant_id="TENANT-A",
             idempotency_key="SUBMISSION-1001",
             trade=trade,
+            now=100,
+            **TEST_LEASE,
         )
 
     assert exc_info.value is error
     table.put_item.assert_called_once()
+
+
+def test_register_and_claim_initial_submission_acquires_lease(submission_table) -> None:
+
+    table = submission_table
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    response = register_and_claim_initial_submission(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        trade=trade,
+        recovery_token="initial-token",
+        lease_expires_at=200,
+        now=100,
+    )
+    assert response == "READY_TO_START"
+
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    claimed_submission = table.get_item(
+        Key=key,
+        ConsistentRead=True,
+    )["Item"]
+
+    assert claimed_submission == {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+        "status": "STARTING",
+        "recovery_token": "initial-token",
+        "lease_expires_at": 200,
+    }
+
+
+def test_register_and_claim_initial_submission_matching_duplicate_preserves_lease(
+    submission_table,
+) -> None:
+
+    table = submission_table
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    initial_response = register_and_claim_initial_submission(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        trade=trade,
+        recovery_token="initial-token",
+        lease_expires_at=200,
+        now=100,
+    )
+    assert initial_response == "READY_TO_START"
+
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    pre_dup_submission = table.get_item(
+        Key=key,
+        ConsistentRead=True,
+    )["Item"]
+
+    second_response = register_and_claim_initial_submission(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        trade=trade,
+        recovery_token="second-token",
+        lease_expires_at=300,
+        now=150,
+    )
+    assert second_response == "MATCH"
+
+    post_dup_submission = table.get_item(
+        Key=key,
+        ConsistentRead=True,
+    )["Item"]
+
+    assert post_dup_submission == {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+        "status": "STARTING",
+        "recovery_token": "initial-token",
+        "lease_expires_at": 200,
+    }
+
+    assert pre_dup_submission == post_dup_submission
+
+
+def test_register_and_claim_initial_submission_conflict_preserves_record(
+    submission_table,
+) -> None:
+
+    table = submission_table
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    initial_response = register_and_claim_initial_submission(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        trade=trade,
+        recovery_token="initial-token",
+        lease_expires_at=200,
+        now=100,
+    )
+    assert initial_response == "READY_TO_START"
+
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    pre_second_submission = table.get_item(
+        Key=key,
+        ConsistentRead=True,
+    )["Item"]
+
+    modified_trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 30,
+        }
+    )
+
+    # with key with different volume
+    second_response = register_and_claim_initial_submission(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        trade=modified_trade,
+        recovery_token="second-token",
+        lease_expires_at=300,
+        now=150,
+    )
+    assert second_response == "CONFLICT"
+
+    post_second_submission = table.get_item(
+        Key=key,
+        ConsistentRead=True,
+    )["Item"]
+
+    assert pre_second_submission == {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+        "status": "STARTING",
+        "recovery_token": "initial-token",
+        "lease_expires_at": 200,
+    }
+
+    #  item in registry is not modified
+    assert pre_second_submission == post_second_submission
+    assert post_second_submission[
+        "payload_fingerprint"
+    ] != fingerprint_normalised_trade(modified_trade)
+
+
+def test_register_and_claim_initial_submission_uses_single_write() -> None:
+
+    table = Mock()
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    response = register_and_claim_initial_submission(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        trade=trade,
+        recovery_token="initial-token",
+        lease_expires_at=200,
+        now=100,
+    )
+
+    assert response == "READY_TO_START"
+    table.put_item.assert_called_once()
+    table.update_item.assert_not_called()
+    table.get_item.assert_not_called()
+
+
+def test_register_and_claim_initial_submission_registration_failure_skips_lease() -> (
+    None
+):
+    table = Mock()
+
+    error = table.put_item.side_effect = ClientError(
+        {
+            "Error": {
+                "Code": "AccessDeniedException",
+                "Message": "Access denied",
+            }
+        },
+        "put_item",
+    )
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    with pytest.raises(ClientError) as exc_info:
+        register_and_claim_initial_submission(
+            table=table,
+            tenant_id="TENANT-A",
+            idempotency_key="SUBMISSION-1001",
+            trade=trade,
+            recovery_token="initial-token",
+            lease_expires_at=200,
+            now=100,
+        )
+
+    assert exc_info.value.response["Error"]["Code"] == "AccessDeniedException"
+    assert exc_info.value is error
+    table.put_item.assert_called_once()
+    table.get_item.assert_not_called()
+    table.update_item.assert_not_called()  # lease acquisition attempt was skipped

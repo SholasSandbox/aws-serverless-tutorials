@@ -139,9 +139,13 @@ def select_correlation_id(headers: Mapping[str, str], request_id: str) -> str:
     return headers.get("x-correlation-id", "").strip() or request_id
 
 
-def build_execution_name(idempotency_key: str) -> str:
-    """Create a stable, Step Functions-safe execution name."""
-    digest = hashlib.sha256(idempotency_key.encode("utf-8")).hexdigest()[:24]
+def build_execution_name(tenant_id: str, idempotency_key: str) -> str:
+    """Create a stable execution name scoped to the tenant."""
+    identity = json.dumps(
+        [tenant_id, idempotency_key],
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24]
     return f"trade-submit-{digest}"
 
 
@@ -183,6 +187,9 @@ def register_trade_for_handoff(
     tenant_id: str,
     idempotency_key: str,
     trade: Mapping[str, Any],
+    recovery_token: str,
+    lease_expires_at: int,
+    now: int,
 ) -> str:
     """
     Register a normalized trade submission or classify
@@ -203,6 +210,9 @@ def register_trade_for_handoff(
         tenant_id=tenant_id,
         idempotency_key=idempotency_key,
         payload_fingerprint=payload_fingerprint,
+        recovery_token=recovery_token,
+        lease_expires_at=lease_expires_at,
+        now=now,
     )
     match submission_status:
         case "CREATED":
@@ -257,6 +267,7 @@ def handle_trade_submission(
     *,
     step_functions_client: Any,
     state_machine_arn: str,
+    tenant_id: str,
 ) -> dict[str, Any]:
     """Translate an HTTP request into an asynchronous workflow start."""
     request_id = extract_request_id(event, context)
@@ -284,7 +295,9 @@ def handle_trade_submission(
             },
         )
 
-    execution_name = build_execution_name(idempotency_key)
+    execution_name = build_execution_name(
+        tenant_id=tenant_id, idempotency_key=idempotency_key
+    )
     workflow_input = build_workflow_input(
         trade=trade,
         idempotency_key=idempotency_key,
@@ -374,3 +387,45 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         ),
         state_machine_arn=state_machine_arn,
     )
+
+
+def register_and_claim_initial_submission(
+    *,
+    table: Any,
+    tenant_id: str,
+    idempotency_key: str,
+    trade: Mapping[str, Any],
+    recovery_token: str,
+    lease_expires_at: int,
+    now: int,
+) -> str:
+    """
+    Register a submission and acquire initial ownership.
+
+    Returns:
+        "READY_TO_START" when registration and
+        ownership acquisition both succeed.
+
+        "MATCH" for an existing identical submission.
+        "CONFLICT" for an existing conflicting submission.
+
+    Raises:
+        ClientError when a DynamoDB operation fails.
+    """
+    registered_status = register_trade_for_handoff(
+        table=table,
+        tenant_id=tenant_id,
+        idempotency_key=idempotency_key,
+        trade=trade,
+        recovery_token=recovery_token,
+        lease_expires_at=lease_expires_at,
+        now=now,
+    )
+
+    if registered_status == "CREATED":
+        return "READY_TO_START"
+
+    if registered_status in ["MATCH", "CONFLICT"]:
+        return registered_status
+
+    raise ValueError(f"Unexpected registration status: {registered_status!r}.")
