@@ -9,10 +9,12 @@ from unittest.mock import Mock
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
 
+import api_workflow_handoff
 from api_workflow_handoff import (
     build_execution_name,
     extract_authenticated_tenant_id,
     handle_trade_submission,
+    lambda_handler,
     normalise_trade,
     register_and_claim_initial_submission,
     register_trade_for_handoff,
@@ -1208,3 +1210,176 @@ def test_extract_authenticated_tenant_id_rejects_malformed_event_structure() -> 
         match=r"^JWT authorizer context is missing or invalid\.$",
     ):
         extract_authenticated_tenant_id(event=event)
+
+
+def test_lambda_handler_forwards_authenticated_tenant(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+
+    event = make_event(request_id="REQ-123")
+    authorizer = {
+        "jwt": {
+            "claims": {
+                "tenant_id": "TENANT-A",
+            },
+            "scopes": ["trades:submit"],
+        },
+    }
+    event["requestContext"]["authorizer"] = authorizer
+
+    context = SimpleNamespace(aws_request_id="LAMBDA-789")
+
+    # Supply the environment configuration expected by lambda_handler.
+    monkeypatch.setenv("TRADE_STATE_MACHINE_ARN", STATE_MACHINE_ARN)
+
+    # Create fake dependencies
+    fake_client = Mock()
+    mock_get_client = Mock(return_value=fake_client)
+    mock_handler = Mock(return_value={"statusCode": 202, "body": "{}"})
+
+    # Replace production dependencies with mocks for this test.
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "get_step_functions_client",
+        mock_get_client,
+    )
+
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "handle_trade_submission",
+        mock_handler,
+    )
+
+    # Act
+    response = lambda_handler(event, context)
+
+    # Assert
+    assert response["statusCode"] == 202
+
+    mock_get_client.assert_called_once()
+
+    mock_handler.assert_called_once_with(
+        event,
+        context,
+        step_functions_client=fake_client,
+        state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
+    )
+
+
+def test_lambda_handler_ignores_untrusted_tenant_header(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+
+    event = make_event(request_id="REQ-123")
+
+    event["headers"]["x-tenant-id"] = "TENANT-B"
+
+    event["requestContext"]["authorizer"] = {
+        "jwt": {
+            "claims": {
+                "tenant_id": "TENANT-A",
+            }
+        }
+    }
+
+    # Supply the environment configuration expected by lambda_handler.
+    monkeypatch.setenv("TRADE_STATE_MACHINE_ARN", STATE_MACHINE_ARN)
+
+    # Create fake dependencies
+    fake_client = Mock()
+    mock_get_client = Mock(return_value=fake_client)
+    mock_handler = Mock(return_value={"statusCode": 202, "body": "{}"})
+
+    # Replace production dependencies with mocks for this test.
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "get_step_functions_client",
+        mock_get_client,
+    )
+
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "handle_trade_submission",
+        mock_handler,
+    )
+
+    context = SimpleNamespace(aws_request_id="LAMBDA-789")
+    # Act
+    response = lambda_handler(
+        event,
+        context,
+    )
+
+    # Assert
+    assert response["statusCode"] == 202
+
+    mock_get_client.assert_called_once()
+    mock_handler.assert_called_once_with(
+        event,
+        context,
+        step_functions_client=fake_client,
+        state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
+    )
+
+
+@pytest.mark.parametrize(
+    "authorizer, extra_headers",
+    [
+        pytest.param(
+            {"jwt": {"claims": {}}},
+            {},
+            id="missing-tenant",
+        ),
+        pytest.param(
+            "not-a-dictionary",
+            {},
+            id="invalid-authorizer",
+        ),
+        pytest.param(
+            {"jwt": {"claims": {}}},
+            {"x-tenant-id": "TENANT-FROM-HEADER"},
+            id="header-cannot-supply-tenant",
+        ),
+    ],
+)
+def test_lambda_handler_rejects_untrusted_tenant_identity(
+    monkeypatch: pytest.MonkeyPatch,
+    authorizer: object,
+    extra_headers: dict[str, str],
+) -> None:
+    event = make_event(request_id="REQ-123")
+    event["requestContext"]["authorizer"] = authorizer
+    event["headers"].update(extra_headers)
+
+    monkeypatch.setenv("TRADE_STATE_MACHINE_ARN", STATE_MACHINE_ARN)
+
+    mock_get_client = Mock()
+    mock_handler = Mock()
+
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "get_step_functions_client",
+        mock_get_client,
+    )
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "handle_trade_submission",
+        mock_handler,
+    )
+
+    response = lambda_handler(
+        event,
+        SimpleNamespace(aws_request_id="LAMBDA-789"),
+    )
+
+    assert response["statusCode"] == 403
+    assert json.loads(response["body"]) == {
+        "error": "Forbidden.",
+        "correlation_id": "REQ-123",
+    }
+    assert response["headers"]["x-correlation-id"] == "REQ-123"
+
+    mock_get_client.assert_not_called()
+    mock_handler.assert_not_called()

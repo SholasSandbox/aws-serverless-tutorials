@@ -379,6 +379,21 @@ def get_step_functions_client() -> Any:
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """AWS Lambda entry point."""
     state_machine_arn = os.environ.get("TRADE_STATE_MACHINE_ARN", "")
+
+    try:
+        tenant_id = extract_authenticated_tenant_id(event)
+    except ValueError:
+        request_id = extract_request_id(event, context)
+
+        return json_response(
+            status_code=403,
+            correlation_id=request_id,
+            body={
+                "error": "Forbidden.",
+                "correlation_id": request_id,
+            },
+        )
+
     return handle_trade_submission(
         event,
         context,
@@ -386,6 +401,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             get_step_functions_client() if state_machine_arn else None
         ),
         state_machine_arn=state_machine_arn,
+        tenant_id=tenant_id,
     )
 
 
