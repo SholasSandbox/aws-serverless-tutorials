@@ -4,7 +4,7 @@ import base64
 import json
 import re
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
@@ -12,6 +12,7 @@ from botocore.exceptions import ClientError, EndpointConnectionError
 import api_workflow_handoff
 from api_workflow_handoff import (
     build_execution_name,
+    coordinate_initial_trade_start,
     extract_authenticated_tenant_id,
     handle_trade_submission,
     lambda_handler,
@@ -1383,3 +1384,424 @@ def test_lambda_handler_rejects_untrusted_tenant_identity(
 
     mock_get_client.assert_not_called()
     mock_handler.assert_not_called()
+
+
+def test_coordinate_initial_trade_start_confirms_success(
+    submission_table,
+) -> None:
+
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    execution_name = build_execution_name(
+        "TENANT-A",
+        "SUBMISSION-1001",
+    )
+
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+
+    expected_record = {
+        **key,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+        "status": "START_CONFIRMED",
+        "recovery_token": "TOKEN-A",
+        "lease_expires_at": 200,
+        "execution_arn": expected_execution_arn,
+    }
+
+    client = Mock()
+    client.start_execution.return_value = {
+        "executionArn": expected_record["execution_arn"],
+        "startDate": "2026-01-01T00:00:00Z",
+    }
+
+    response = coordinate_initial_trade_start(
+        table=submission_table,
+        step_functions_client=client,
+        state_machine_arn=STATE_MACHINE_ARN,
+        **key,
+        trade=trade,
+        recovery_token=expected_record["recovery_token"],
+        lease_expires_at=expected_record["lease_expires_at"],
+        registration_now=100,
+        confirmation_now=150,
+    )
+
+    stored_record = submission_table.get_item(
+        Key={
+            "tenant_id": "TENANT-A",
+            "idempotency_key": "SUBMISSION-1001",
+        },
+        ConsistentRead=True,
+    )["Item"]
+
+    assert stored_record == expected_record
+
+    assert response == {
+        "status": "START_CONFIRMED",
+        "execution_arn": expected_execution_arn,
+    }
+
+    client.start_execution.assert_called_once()
+    start_args = client.start_execution.call_args.kwargs
+
+    assert start_args["stateMachineArn"] == STATE_MACHINE_ARN
+    assert start_args["name"] == build_execution_name("TENANT-A", "SUBMISSION-1001")
+    assert json.loads(start_args["input"]) == {
+        "trade": trade,
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+
+def test_coordinate_initial_trade_start_confirmed_matching_duplicate_skips_workflow(
+    submission_table,
+) -> None:
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    execution_name = build_execution_name(
+        "TENANT-A",
+        "SUBMISSION-1001",
+    )
+
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+
+    expected_record = {
+        **key,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+        "status": "START_CONFIRMED",
+        "recovery_token": "TOKEN-A",
+        "lease_expires_at": 200,
+        "execution_arn": expected_execution_arn,
+    }
+
+    client = Mock()
+    client.start_execution.return_value = {
+        "executionArn": expected_record["execution_arn"],
+        "startDate": "2026-01-01T00:00:00Z",
+    }
+
+    coordinate_initial_trade_start(
+        table=submission_table,
+        step_functions_client=client,
+        state_machine_arn=STATE_MACHINE_ARN,
+        **key,
+        trade=trade,
+        recovery_token=expected_record["recovery_token"],
+        lease_expires_at=expected_record["lease_expires_at"],
+        registration_now=100,
+        confirmation_now=150,
+    )
+
+    stored_record = submission_table.get_item(
+        Key={
+            "tenant_id": "TENANT-A",
+            "idempotency_key": "SUBMISSION-1001",
+        },
+        ConsistentRead=True,
+    )["Item"]
+    assert stored_record == expected_record
+    client.start_execution.assert_called_once()
+
+    client.start_execution.reset_mock()  # clear call history before the duplicate
+
+    duplicate_record = {
+        **expected_record,
+        "recovery_token": "TOKEN-B",
+        "lease_expires_at": 300,
+        "registration_now": 160,
+        "confirmation_now": 170,
+    }
+    duplicate_response = coordinate_initial_trade_start(
+        table=submission_table,
+        step_functions_client=client,
+        state_machine_arn=STATE_MACHINE_ARN,
+        **key,
+        trade=trade,
+        recovery_token=duplicate_record["recovery_token"],
+        lease_expires_at=duplicate_record["lease_expires_at"],
+        registration_now=duplicate_record["registration_now"],
+        confirmation_now=duplicate_record["confirmation_now"],
+    )
+    post_duplicate_record = submission_table.get_item(
+        Key={
+            "tenant_id": "TENANT-A",
+            "idempotency_key": "SUBMISSION-1001",
+        },
+        ConsistentRead=True,
+    )["Item"]
+
+    assert duplicate_response == {
+        "status": "MATCH",
+    }
+    assert post_duplicate_record == stored_record
+    client.start_execution.assert_not_called()
+
+
+def test_coordinate_initial_trade_start_conflicting_payload_skips_workflow(
+    submission_table,
+) -> None:
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    execution_name = build_execution_name(
+        "TENANT-A",
+        "SUBMISSION-1001",
+    )
+
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+
+    expected_record = {
+        **key,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+        "status": "START_CONFIRMED",
+        "recovery_token": "TOKEN-A",
+        "lease_expires_at": 200,
+        "execution_arn": expected_execution_arn,
+    }
+
+    client = Mock()
+    client.start_execution.return_value = {
+        "executionArn": expected_record["execution_arn"],
+        "startDate": "2026-01-01T00:00:00Z",
+    }
+
+    coordinate_initial_trade_start(
+        table=submission_table,
+        step_functions_client=client,
+        state_machine_arn=STATE_MACHINE_ARN,
+        **key,
+        trade=trade,
+        recovery_token=expected_record["recovery_token"],
+        lease_expires_at=expected_record["lease_expires_at"],
+        registration_now=100,
+        confirmation_now=150,
+    )
+
+    stored_record = submission_table.get_item(
+        Key={
+            "tenant_id": "TENANT-A",
+            "idempotency_key": "SUBMISSION-1001",
+        },
+        ConsistentRead=True,
+    )["Item"]
+    assert stored_record == expected_record
+    client.start_execution.assert_called_once()
+
+    client.start_execution.reset_mock()  # clear call history before the duplicate
+
+    conflicting_attempt = {
+        **expected_record,
+        "trade": normalise_trade(
+            {
+                "trade_id": "TRD-1001",
+                "product": "POWER",
+                "volume_mwh": 50,
+            }
+        ),
+        "recovery_token": "TOKEN-B",
+        "lease_expires_at": 300,
+        "registration_now": 160,
+        "confirmation_now": 170,
+    }
+    conflict_response = coordinate_initial_trade_start(
+        table=submission_table,
+        step_functions_client=client,
+        state_machine_arn=STATE_MACHINE_ARN,
+        **key,
+        trade=conflicting_attempt["trade"],
+        recovery_token=conflicting_attempt["recovery_token"],
+        lease_expires_at=conflicting_attempt["lease_expires_at"],
+        registration_now=conflicting_attempt["registration_now"],
+        confirmation_now=conflicting_attempt["confirmation_now"],
+    )
+    post_conflicting_attempt = submission_table.get_item(
+        Key={
+            "tenant_id": "TENANT-A",
+            "idempotency_key": "SUBMISSION-1001",
+        },
+        ConsistentRead=True,
+    )["Item"]
+
+    assert conflict_response == {
+        "status": "CONFLICT",
+    }
+    assert post_conflicting_attempt == stored_record
+    client.start_execution.assert_not_called()
+
+
+def test_coordinate_initial_trade_start_start_error_leaves_unconfirmed(
+    submission_table,
+) -> None:
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    expected_record = {
+        **key,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+        "status": "STARTING",
+        "recovery_token": "TOKEN-A",
+        "lease_expires_at": 200,
+    }
+
+    client = Mock()
+    error = client.start_execution.side_effect = ClientError(
+        {
+            "Error": {
+                "Code": "ThrottlingException",
+                "Message": "Rate exceeded",
+            }
+        },
+        "StartExecution",
+    )
+
+    with pytest.raises(ClientError) as exc_info:
+        coordinate_initial_trade_start(
+            table=submission_table,
+            step_functions_client=client,
+            state_machine_arn=STATE_MACHINE_ARN,
+            **key,
+            trade=trade,
+            recovery_token=expected_record["recovery_token"],
+            lease_expires_at=expected_record["lease_expires_at"],
+            registration_now=100,
+            confirmation_now=150,
+        )
+
+    assert exc_info.value.response["Error"]["Code"] == "ThrottlingException"
+    assert exc_info.value is error
+    starting_record = submission_table.get_item(
+        Key={
+            "tenant_id": "TENANT-A",
+            "idempotency_key": "SUBMISSION-1001",
+        },
+        ConsistentRead=True,
+    )["Item"]
+
+    assert starting_record == expected_record
+    client.start_execution.assert_called_once()
+
+
+def test_coordinate_initial_trade_start_confirmation_failure(
+    submission_table,
+) -> None:
+
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    execution_name = build_execution_name(
+        "TENANT-A",
+        "SUBMISSION-1001",
+    )
+
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+
+    expected_record = {
+        **key,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+        "status": "STARTING",
+        "recovery_token": "TOKEN-A",
+        "lease_expires_at": 200,
+    }
+
+    client = Mock()
+    client.start_execution.return_value = {
+        "executionArn": expected_execution_arn,
+        "startDate": "2026-01-01T00:00:00Z",
+    }
+
+    error = ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "Access denied"}},
+        "UpdateItem",
+    )
+
+    with patch.object(submission_table, "update_item", side_effect=error):
+        with pytest.raises(ClientError) as exc_info:
+            coordinate_initial_trade_start(
+                table=submission_table,
+                step_functions_client=client,
+                state_machine_arn=STATE_MACHINE_ARN,
+                **key,
+                trade=trade,
+                recovery_token="TOKEN-A",
+                lease_expires_at=200,
+                registration_now=100,
+                confirmation_now=150,
+            )
+
+    assert exc_info.value is error
+    assert exc_info.value.response["Error"]["Code"] == "AccessDeniedException"
+
+    # execution started but DynamoDB not updated — no execution_arn, status still STARTING
+    record = submission_table.get_item(
+        Key={
+            "tenant_id": "TENANT-A",
+            "idempotency_key": "SUBMISSION-1001",
+        },
+        ConsistentRead=True,
+    )["Item"]
+    assert record == expected_record
+    assert "execution_arn" not in record
+    client.start_execution.assert_called_once()

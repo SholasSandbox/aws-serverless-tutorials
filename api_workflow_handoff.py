@@ -29,6 +29,7 @@ from botocore.exceptions import (
 
 from submission_registry import (
     classify_existing_submission,
+    confirm_submission_started,
     fingerprint_normalised_trade,
     register_submission,
 )
@@ -477,3 +478,67 @@ def extract_authenticated_tenant_id(
         raise ValueError("Authenticated tenant ID is missing or invalid.")
 
     return tenant_id
+
+
+def coordinate_initial_trade_start(
+    *,
+    table: Any,
+    step_functions_client: Any,
+    state_machine_arn: str,
+    tenant_id: str,
+    idempotency_key: str,
+    trade: Mapping[str, Any],
+    recovery_token: str,
+    lease_expires_at: int,
+    registration_now: int,
+    confirmation_now: int,
+) -> dict[str, str]:
+    """Coordinate registration, workflow start and confirmation."""
+
+    if not isinstance(state_machine_arn, str) or not state_machine_arn.strip():
+        raise ValueError("state_machine_arn must be a non-empty string.")
+
+    registered_status = register_and_claim_initial_submission(
+        table=table,
+        tenant_id=tenant_id,
+        idempotency_key=idempotency_key,
+        trade=trade,
+        recovery_token=recovery_token,
+        lease_expires_at=lease_expires_at,
+        now=registration_now,
+    )
+
+    if registered_status == "READY_TO_START":
+        execution_name = build_execution_name(
+            tenant_id=tenant_id,
+            idempotency_key=idempotency_key,
+        )
+        workflow_input = build_workflow_input(
+            trade=trade,
+            idempotency_key=idempotency_key,
+        )
+        workflow_start = start_trade_workflow(
+            step_functions_client=step_functions_client,
+            state_machine_arn=state_machine_arn,
+            execution_name=execution_name,
+            workflow_input=workflow_input,
+        )
+
+        execution_arn = workflow_start["execution_arn"]
+
+        status = confirm_submission_started(
+            table=table,
+            tenant_id=tenant_id,
+            idempotency_key=idempotency_key,
+            execution_arn=execution_arn,
+            recovery_token=recovery_token,
+            now=confirmation_now,
+        )
+        return {
+            "status": status,
+            "execution_arn": execution_arn,
+        }
+    if registered_status in ["MATCH", "CONFLICT"]:
+        return {"status": registered_status}
+
+    raise ValueError(f"Unexpected registration status: {registered_status!r}.")
