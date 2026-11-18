@@ -13,6 +13,8 @@ import api_workflow_handoff
 from api_workflow_handoff import (
     build_execution_name,
     coordinate_initial_trade_start,
+    derive_execution_arn,
+    describe_trade_execution,
     extract_authenticated_tenant_id,
     handle_trade_submission,
     lambda_handler,
@@ -1805,3 +1807,327 @@ def test_coordinate_initial_trade_start_confirmation_failure(
     assert record == expected_record
     assert "execution_arn" not in record
     client.start_execution.assert_called_once()
+
+
+def test_describe_trade_execution_running():
+    """Returns FOUND and RUNNING"""
+    client = Mock()
+
+    execution_name = build_execution_name(
+        "TENANT-A",
+        "SUBMISSION-1001",
+    )
+
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+
+    client.describe_execution.return_value = {
+        "executionArn": expected_execution_arn,
+        "status": "RUNNING",
+    }
+
+    response = describe_trade_execution(
+        step_functions_client=client, execution_arn=expected_execution_arn
+    )
+
+    assert response == {
+        "lookup_status": "FOUND",
+        "execution_arn": expected_execution_arn,
+        "execution_status": "RUNNING",
+    }
+
+    client.describe_execution.assert_called_once_with(
+        executionArn=expected_execution_arn,
+        includedData="ALL_DATA",
+    )
+
+
+def test_describe_trade_execution_succeeded():
+    """Returns FOUND and SUCCEEDED"""
+    client = Mock()
+
+    execution_name = build_execution_name(
+        "TENANT-A",
+        "SUBMISSION-1001",
+    )
+
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+
+    client.describe_execution.return_value = {
+        "executionArn": expected_execution_arn,
+        "status": "SUCCEEDED",
+    }
+
+    response = describe_trade_execution(
+        step_functions_client=client, execution_arn=expected_execution_arn
+    )
+
+    assert response == {
+        "lookup_status": "FOUND",
+        "execution_arn": expected_execution_arn,
+        "execution_status": "SUCCEEDED",
+    }
+
+    client.describe_execution.assert_called_once_with(
+        executionArn=expected_execution_arn,
+        includedData="ALL_DATA",
+    )
+
+
+def test_describe_trade_execution_not_observed():
+    """Converts ExecutionDoesNotExist to NOT_OBSERVED"""
+    client = Mock()
+    client.describe_execution.side_effect = ClientError(
+        {
+            "Error": {
+                "Code": "ExecutionDoesNotExist",
+                "Message": "Execution Does Not Exist",
+            }
+        },
+        "describe_execution",
+    )
+
+    execution_name = build_execution_name(
+        "TENANT-A",
+        "SUBMISSION-1001",
+    )
+
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+
+    response = describe_trade_execution(
+        step_functions_client=client, execution_arn=expected_execution_arn
+    )
+
+    assert response == {
+        "lookup_status": "NOT_OBSERVED",
+        "execution_arn": expected_execution_arn,
+    }
+
+    client.describe_execution.assert_called_once_with(
+        executionArn=expected_execution_arn,
+        includedData="ALL_DATA",
+    )
+
+
+def test_describe_trade_execution_propagates_access_denied():
+    """Original ClientError propagates"""
+    client = Mock()
+    error = client.describe_execution.side_effect = ClientError(
+        {
+            "Error": {
+                "Code": "AccessDeniedException",
+                "Message": "Access Denied",
+            }
+        },
+        "describe_execution",
+    )
+
+    execution_name = build_execution_name(
+        "TENANT-A",
+        "SUBMISSION-1001",
+    )
+
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+
+    with pytest.raises(ClientError) as exc_info:
+        describe_trade_execution(
+            step_functions_client=client, execution_arn=expected_execution_arn
+        )
+    assert exc_info.value is error
+    client.describe_execution.assert_called_once_with(
+        executionArn=expected_execution_arn,
+        includedData="ALL_DATA",
+    )
+
+
+def test_describe_trade_execution_rejects_unknown_status() -> None:
+    client = Mock()
+    execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:test-run"
+    )
+    client.describe_execution.return_value = {
+        "executionArn": execution_arn,
+        "status": "UNKNOWN",
+    }
+
+    with pytest.raises(
+        ValueError,
+        match=r"^Unhandled execution status: 'UNKNOWN'$",
+    ):
+        describe_trade_execution(
+            step_functions_client=client,
+            execution_arn=execution_arn,
+        )
+    client.describe_execution.assert_called_once_with(
+        executionArn=execution_arn,
+        includedData="ALL_DATA",
+    )
+
+
+def test_derive_execution_arn_standard_partition() -> None:
+    """Derive the correct execution ARN from a valid state-machine ARN."""
+
+    # Arrange
+    state_machine_arn = (
+        "arn:aws:states:eu-west-2:123456789012:stateMachine:trade-processing"
+    )
+
+    execution_name = "trade-submit-123"
+
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        "execution:trade-processing:trade-submit-123"
+    )
+
+    # Act
+    actual_execution_arn = derive_execution_arn(
+        state_machine_arn=state_machine_arn,
+        execution_name=execution_name,
+    )
+
+    # Assert
+    assert actual_execution_arn == expected_execution_arn
+
+
+def test_derive_execution_arn_govcloud_partition():
+    """Correct GovCloud execution ARN"""
+
+    GOVCLOUD_STATE_MACHINE_ARN = (
+        "arn:aws-us-gov:states:us-gov-west-1:123456789012:stateMachine:trade-processing"
+    )
+
+    execution_name = "trade-submit-123"
+
+    expected_execution_arn = (
+        "arn:aws-us-gov:states:us-gov-west-1:123456789012:"
+        "execution:trade-processing:trade-submit-123"
+    )
+
+    actual_execution_arn = derive_execution_arn(
+        state_machine_arn=GOVCLOUD_STATE_MACHINE_ARN,
+        execution_name=execution_name,
+    )
+
+    assert actual_execution_arn == expected_execution_arn
+
+
+@pytest.mark.parametrize(
+    "state_machine_arn",
+    [
+        pytest.param(f"{STATE_MACHINE_ARN}:PROD", id="alias"),
+        pytest.param(f"{STATE_MACHINE_ARN}:8", id="version"),
+    ],
+)
+def test_derive_execution_arn_rejects_version_or_alias_arn(
+    state_machine_arn: str,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"^Expected an unqualified Step Functions state machine ARN\.$",
+    ):
+        derive_execution_arn(
+            state_machine_arn=state_machine_arn, execution_name="trade-submit-123"
+        )
+
+
+@pytest.mark.parametrize(
+    "state_machine_arn",
+    [
+        pytest.param(
+            "arn:aws:states::123456789012:stateMachine:trade-processing",
+            id="missing-region",
+        ),
+        pytest.param(
+            "arn:aws:states:eu-west-2:12345678901:stateMachine:trade-processing",
+            id="eleven-digit-account",
+        ),
+        pytest.param(
+            "arn:aws:states:eu-west-2:123456789012:"
+            "execution:trade-processing:trade-submit-123",
+            id="execution-arn",
+        ),
+        pytest.param(f"{STATE_MACHINE_ARN}/ProcessTrades", id="distributed-map"),
+    ],
+)
+def test_derive_execution_arn_rejects_malformed_or_unsupported_arn(
+    state_machine_arn: str,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"^Expected an unqualified Step Functions state machine ARN\.$",
+    ):
+        derive_execution_arn(
+            state_machine_arn=state_machine_arn,
+            execution_name="trade-submit-123",
+        )
+
+
+@pytest.mark.parametrize(
+    "state_machine_arn",
+    [
+        pytest.param(
+            "arn:aws:states:eu-west-\u0662:123456789012:stateMachine:trade-processing",
+            id="unicode-region-digit",
+        ),
+        pytest.param(
+            "arn:aws:states:eu-west-2:\u066123456789012:stateMachine:trade-processing",
+            id="unicode-account-digit",
+        ),
+    ],
+)
+def test_derive_execution_arn_rejects_unicode_digits_in_arn(
+    state_machine_arn: str,
+) -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"^Expected an unqualified Step Functions state machine ARN\.$",
+    ):
+        derive_execution_arn(
+            state_machine_arn=state_machine_arn,
+            execution_name="trade-submit-123",
+        )
+
+
+@pytest.mark.parametrize(
+    "execution_name",
+    [
+        pytest.param("", id="empty-name"),
+        pytest.param("trade-submit:123", id="colon-in-name"),
+        pytest.param("x" * 81, id="eighty-one-characters"),
+    ],
+)
+def test_derive_execution_arn_rejects_invalid_execution_name(
+    execution_name: str,
+) -> None:
+    with pytest.raises(ValueError, match=r"^execution_name must be 1–80 characters"):
+        derive_execution_arn(
+            state_machine_arn=STATE_MACHINE_ARN,
+            execution_name=execution_name,
+        )
+
+
+@pytest.mark.parametrize(
+    "execution_name",
+    [
+        pytest.param("trade-submit-\u0661", id="arabic-indic-digit"),
+        pytest.param("trade-submit-\u0967", id="devanagari-digit"),
+        pytest.param("trade-submit-\uff11", id="fullwidth-digit"),
+    ],
+)
+def test_derive_execution_arn_rejects_unicode_digits(execution_name: str) -> None:
+    with pytest.raises(ValueError, match=r"^execution_name must be 1–80 characters"):
+        derive_execution_arn(
+            state_machine_arn=STATE_MACHINE_ARN,
+            execution_name=execution_name,
+        )

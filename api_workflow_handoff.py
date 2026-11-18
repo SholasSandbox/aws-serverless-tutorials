@@ -13,6 +13,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 from collections.abc import Mapping
 from typing import Any
 
@@ -542,3 +543,100 @@ def coordinate_initial_trade_start(
         return {"status": registered_status}
 
     raise ValueError(f"Unexpected registration status: {registered_status!r}.")
+
+
+def describe_trade_execution(
+    *,
+    step_functions_client: Any,
+    execution_arn: str,
+) -> dict[str, str]:
+    """
+    Look up a Step Functions execution.
+
+    Returns execution metadata when found,
+    or NOT_OBSERVED for ExecutionDoesNotExist.
+
+    Propagates other AWS errors.
+    """
+    client = step_functions_client
+    try:
+        response = client.describe_execution(
+            executionArn=execution_arn,
+            includedData="ALL_DATA",
+        )
+
+        status = response.get("status")
+
+        if status in [
+            "SUCCEEDED",
+            "FAILED",
+            "TIMED_OUT",
+            "ABORTED",
+            "RUNNING",
+            "PENDING_REDRIVE",
+        ]:
+            return {
+                "lookup_status": "FOUND",
+                "execution_arn": response["executionArn"],
+                "execution_status": status,
+            }
+
+        raise ValueError(f"Unhandled execution status: {status!r}")
+
+    except ClientError as exc_info:
+        if exc_info.response["Error"]["Code"] == "ExecutionDoesNotExist":
+            return {
+                "lookup_status": "NOT_OBSERVED",
+                "execution_arn": execution_arn,
+            }
+        raise
+
+
+STATE_MACHINE_ARN_PATTERN = re.compile(
+    r"^arn:(?P<partition>aws|aws-cn|aws-us-gov):states:"
+    r"(?P<region>[a-z]{2}(?:-gov)?-[a-z]+-[0-9]):"
+    r"(?P<account_id>[0-9]{12}):stateMachine:"
+    r"(?P<name>[a-zA-Z0-9_-]{1,80})(?::(?P<qualifier>[a-zA-Z0-9_-]{1,80}))?$"
+)
+
+
+def derive_execution_arn(
+    *,
+    state_machine_arn: str,
+    execution_name: str,
+) -> str:
+    """
+    Derive a Step Functions execution ARN.
+
+    Accepts only an unqualified state-machine ARN.
+
+    Raises:
+        ValueError: If the ARN is malformed, qualified,
+                    or otherwise unsupported.
+
+    Returns:
+        The corresponding execution ARN.
+    """
+    arn_error = "Expected an unqualified Step Functions state machine ARN."
+    if not isinstance(state_machine_arn, str):
+        raise ValueError(arn_error)
+
+    match = STATE_MACHINE_ARN_PATTERN.fullmatch(state_machine_arn)
+    if match is None or match.group("qualifier") is not None:
+        raise ValueError(arn_error)
+
+    if not isinstance(execution_name, str) or not re.fullmatch(
+        r"[A-Za-z0-9_-]{1,80}", execution_name
+    ):
+        raise ValueError(
+            "execution_name must be 1–80 characters using only "
+            "ASCII letters, digits, hyphens or underscores."
+        )
+
+    partition, region, account_id, machine_name = match.group(
+        "partition", "region", "account_id", "name"
+    )
+    return (
+        f"arn:{partition}:states:{region}:{account_id}:"
+        f"execution:{machine_name}:{execution_name}"
+    )
