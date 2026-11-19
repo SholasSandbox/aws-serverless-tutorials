@@ -566,6 +566,9 @@ def describe_trade_execution(
         )
 
         status = response.get("status")
+        input_json= response.get("input")
+        if not isinstance(input_json, str) or not input_json.strip():
+            raise ValueError("Step Functions execution input is missing or blank.")
 
         if status in [
             "SUCCEEDED",
@@ -579,6 +582,7 @@ def describe_trade_execution(
                 "lookup_status": "FOUND",
                 "execution_arn": response["executionArn"],
                 "execution_status": status,
+                "execution_input_json": input_json,
             }
 
         raise ValueError(f"Unhandled execution status: {status!r}")
@@ -640,3 +644,25 @@ def derive_execution_arn(
         f"arn:{partition}:states:{region}:{account_id}:"
         f"execution:{machine_name}:{execution_name}"
     )
+
+
+def execution_input_matches(
+    *,
+    observed_input_json: str,
+    expected_workflow_input: Mapping[str, Any],
+) -> bool:
+    """Compare the parsed execution input with the expected workflow input.
+
+    Raises ValueError when the observed input cannot be parsed as a JSON object.
+    """
+    try:
+        observed_workflow_input = json.loads(observed_input_json)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise ValueError("Observed execution input must be a JSON string.") from exc
+
+    if not isinstance(observed_workflow_input, dict):
+        raise ValueError("Observed execution input must be a JSON object.")
+
+    return json.dumps(
+        observed_workflow_input, sort_keys=True, separators=(",", ":")
+    ) == json.dumps(expected_workflow_input, sort_keys=True, separators=(",", ":"))

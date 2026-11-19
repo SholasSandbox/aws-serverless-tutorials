@@ -12,9 +12,11 @@ from botocore.exceptions import ClientError, EndpointConnectionError
 import api_workflow_handoff
 from api_workflow_handoff import (
     build_execution_name,
+    build_workflow_input,
     coordinate_initial_trade_start,
     derive_execution_arn,
     describe_trade_execution,
+    execution_input_matches,
     extract_authenticated_tenant_id,
     handle_trade_submission,
     lambda_handler,
@@ -1822,10 +1824,15 @@ def test_describe_trade_execution_running():
         "arn:aws:states:eu-west-2:123456789012:"
         f"execution:trade-processing:{execution_name}"
     )
+    execution_input_json = (
+        '{"trade": {"trade_id": "TRD-1001", "product": "POWER", "volume_mwh": 25}, '
+        '"idempotency_key": "SUBMISSION-1001"}'
+    )
 
     client.describe_execution.return_value = {
         "executionArn": expected_execution_arn,
         "status": "RUNNING",
+        "input": execution_input_json,
     }
 
     response = describe_trade_execution(
@@ -1836,6 +1843,7 @@ def test_describe_trade_execution_running():
         "lookup_status": "FOUND",
         "execution_arn": expected_execution_arn,
         "execution_status": "RUNNING",
+        "execution_input_json": execution_input_json,
     }
 
     client.describe_execution.assert_called_once_with(
@@ -1857,10 +1865,15 @@ def test_describe_trade_execution_succeeded():
         "arn:aws:states:eu-west-2:123456789012:"
         f"execution:trade-processing:{execution_name}"
     )
+    execution_input_json = (
+        '{"trade": {"trade_id": "TRD-1001", "product": "POWER", "volume_mwh": 25}, '
+        '"idempotency_key": "SUBMISSION-1001"}'
+    )
 
     client.describe_execution.return_value = {
         "executionArn": expected_execution_arn,
         "status": "SUCCEEDED",
+        "input": execution_input_json,
     }
 
     response = describe_trade_execution(
@@ -1871,6 +1884,7 @@ def test_describe_trade_execution_succeeded():
         "lookup_status": "FOUND",
         "execution_arn": expected_execution_arn,
         "execution_status": "SUCCEEDED",
+        "execution_input_json": execution_input_json,
     }
 
     client.describe_execution.assert_called_once_with(
@@ -1959,6 +1973,7 @@ def test_describe_trade_execution_rejects_unknown_status() -> None:
     client.describe_execution.return_value = {
         "executionArn": execution_arn,
         "status": "UNKNOWN",
+        "input": "{}",
     }
 
     with pytest.raises(
@@ -2130,4 +2145,247 @@ def test_derive_execution_arn_rejects_unicode_digits(execution_name: str) -> Non
         derive_execution_arn(
             state_machine_arn=STATE_MACHINE_ARN,
             execution_name=execution_name,
+        )
+
+
+@pytest.mark.parametrize(
+    ("trade_changes", "idempotency_key", "matches"),
+    [
+        pytest.param({}, "SUBMISSION-1", True, id="same-input"),
+        pytest.param(
+            {"trade_id": "TRD-1002"}, "SUBMISSION-1", False, id="different-trade-id"
+        ),
+        pytest.param({"product": "GAS"}, "SUBMISSION-1", False, id="different-product"),
+        pytest.param({"volume_mwh": 2}, "SUBMISSION-1", False, id="different-volume"),
+        pytest.param(
+            {"volume_mwh": True}, "SUBMISSION-1", False, id="python-bool-equals-one"
+        ),
+        pytest.param({}, "SUBMISSION-2", False, id="different-idempotency-key"),
+    ],
+)
+def test_execution_input_matches_compares_trade_fields(
+    trade_changes: dict,
+    idempotency_key: str,
+    matches: bool,
+) -> None:
+    expected_trade = {"trade_id": "TRD-1001", "product": "POWER", "volume_mwh": 1}
+    expected_workflow_input = {
+        "trade": expected_trade,
+        "idempotency_key": "SUBMISSION-1",
+    }
+    observed_input_json = json.dumps(
+        {
+            "trade": {**expected_trade, **trade_changes},
+            "idempotency_key": idempotency_key,
+        }
+    )
+
+    assert (
+        execution_input_matches(
+            observed_input_json=observed_input_json,
+            expected_workflow_input=expected_workflow_input,
+        )
+        is matches
+    )
+
+
+def test_execution_input_matches_rejects_null_trade() -> None:
+    assert (
+        execution_input_matches(
+            observed_input_json='{"trade": null, "idempotency_key": "SUBMISSION-1"}',
+            expected_workflow_input={
+                "trade": {"trade_id": "TRD-1001", "product": "POWER", "volume_mwh": 1},
+                "idempotency_key": "SUBMISSION-1",
+            },
+        )
+        is False
+    )
+
+
+def test_execution_input_matches_chains_malformed_json_error() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"^Observed execution input must be a JSON string\.$",
+    ) as exc_info:
+        execution_input_matches(
+            observed_input_json="{",
+            expected_workflow_input={},
+        )
+
+    assert isinstance(exc_info.value.__cause__, json.JSONDecodeError)
+
+
+def test_execution_input_matches_requires_json_object() -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"^Observed execution input must be a JSON object\.$",
+    ):
+        execution_input_matches(
+            observed_input_json="[]",
+            expected_workflow_input={},
+        )
+
+
+def test_execution_input_matches_identical() -> None:
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+    observed_input = json.dumps(
+        build_workflow_input(trade=trade, idempotency_key="SUBMISSION-1001")
+    )
+    expected_input = {
+        "trade": trade,
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    assert (
+        execution_input_matches(
+            observed_input_json=observed_input, expected_workflow_input=expected_input
+        )
+        is True
+    )
+
+
+@pytest.mark.parametrize(
+    ("observed_input_json", "matches"),
+    [
+        pytest.param(
+            '{"idempotency_key": "SUBMISSION-1001", '
+            '"trade": {"volume_mwh": 25, "product": "POWER", "trade_id": "TRD-1001"}}',
+            True,
+            id="reordered-keys",
+        ),
+        pytest.param(
+            '{"trade": {"trade_id": "TRD-1001", "product": "POWER", "volume_mwh": 25}, '
+            '"idempotency_key": "SUBMISSION-1001", "request_id": "REQ-456"}',
+            False,
+            id="extra-observed-field",
+        ),
+    ],
+)
+def test_execution_input_matches_compares_object_keys(
+    observed_input_json: str,
+    matches: bool,
+) -> None:
+    expected_workflow_input = {
+        "trade": {"trade_id": "TRD-1001", "product": "POWER", "volume_mwh": 25},
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    result = execution_input_matches(
+        observed_input_json=observed_input_json,
+        expected_workflow_input=expected_workflow_input,
+    )
+
+    assert result is matches
+
+
+def test_execution_input_matches_changed_volume() -> None:
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+    observed_input = json.dumps(
+        build_workflow_input(trade=trade, idempotency_key="SUBMISSION-1001")
+    )
+
+    changed_volume_mwh = {
+        "trade": {**trade, "volume_mwh": 50},
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    assert (
+        execution_input_matches(
+            observed_input_json=observed_input,
+            expected_workflow_input=changed_volume_mwh,
+        )
+        is False
+    )
+
+
+def test_execution_input_matches_changed_key() -> None:
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+    observed_input = json.dumps(
+        build_workflow_input(trade=trade, idempotency_key="SUBMISSION-1001")
+    )
+
+    different_idempotency_key = {
+        "trade": trade,
+        "idempotency_key": "SUBMISSION-2002",
+    }
+
+    assert (
+        execution_input_matches(
+            observed_input_json=observed_input,
+            expected_workflow_input=different_idempotency_key,
+        )
+        is False
+    )
+
+
+@pytest.mark.parametrize(
+    "observed_input",
+    [
+        pytest.param("{trade: {}}", id="unquoted-key"),
+        pytest.param('{"trade": {},}', id="trailing-comma"),
+        pytest.param(
+            '{"trade": {} "idempotency_key": "SUBMISSION-1001"}',
+            id="missing-comma",
+        ),
+        pytest.param(
+            '{"idempotency_key": "SUBMISSION-1001}',
+            id="unterminated-string",
+        ),
+    ],
+)
+def test_execution_input_matches_invalid_json(observed_input: str) -> None:
+    with pytest.raises(
+        ValueError,
+        match=r"^Observed execution input must be a JSON string\.$",
+    ) as exc_info:
+        execution_input_matches(
+            observed_input_json=observed_input,
+            expected_workflow_input={},
+        )
+
+    assert isinstance(exc_info.value.__cause__, json.JSONDecodeError)
+
+
+@pytest.mark.parametrize(
+    "input_fields",
+    [
+        pytest.param({}, id="missing-input"),
+        pytest.param({"input": None}, id="null-input"),
+        pytest.param({"input": ""}, id="empty-input"),
+        pytest.param({"input": " \t\n"}, id="whitespace-only-input"),
+        pytest.param({"input": 123}, id="non-string-input"),
+    ],
+)
+def test_describe_trade_execution_rejects_missing_or_blank_input(
+    input_fields: dict[str, str | None],
+) -> None:
+    execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:test-run"
+    )
+    client = Mock()
+    client.describe_execution.return_value = {
+        "executionArn": execution_arn,
+        "status": "RUNNING",
+        **input_fields,
+    }
+
+    with pytest.raises(
+        ValueError,
+        match=r"^Step Functions execution input is missing or blank\.$",
+    ):
+        describe_trade_execution(
+            step_functions_client=client,
+            execution_arn=execution_arn,
         )
