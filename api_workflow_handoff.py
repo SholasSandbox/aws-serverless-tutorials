@@ -566,7 +566,7 @@ def describe_trade_execution(
         )
 
         status = response.get("status")
-        input_json= response.get("input")
+        input_json = response.get("input")
         if not isinstance(input_json, str) or not input_json.strip():
             raise ValueError("Step Functions execution input is missing or blank.")
 
@@ -666,3 +666,102 @@ def execution_input_matches(
     return json.dumps(
         observed_workflow_input, sort_keys=True, separators=(",", ":")
     ) == json.dumps(expected_workflow_input, sort_keys=True, separators=(",", ":"))
+
+
+def inspect_trade_execution_for_recovery(
+    *,
+    step_functions_client: Any,
+    state_machine_arn: str,
+    tenant_id: str,
+    idempotency_key: str,
+    trade: Mapping[str, Any],
+) -> dict[str, str]:
+    """
+    Inspect an existing workflow execution.
+
+    Return VERIFIED when the execution exists and its
+    original input matches the expected workflow input.
+
+    Return INPUT_MISMATCH when an execution exists
+    but its input differs.
+
+    Return INCONCLUSIVE when the execution is NOT_OBSERVED.
+
+    Propagate lookup and input-validation errors.
+    """
+
+    execution_name = build_execution_name(
+        tenant_id=tenant_id,
+        idempotency_key=idempotency_key,
+    )
+    execution_arn = derive_execution_arn(
+        state_machine_arn=state_machine_arn,
+        execution_name=execution_name,
+    )
+    execution_lookup = describe_trade_execution(
+        step_functions_client=step_functions_client,
+        execution_arn=execution_arn,
+    )
+    if execution_lookup["lookup_status"] == "NOT_OBSERVED":
+        return {
+            "reconciliation_status": "INCONCLUSIVE",
+            "execution_arn": execution_arn,
+        }
+
+    workflow_input = build_workflow_input(
+        trade=trade,
+        idempotency_key=idempotency_key,
+    )
+
+    if execution_input_matches(
+        observed_input_json=execution_lookup["execution_input_json"],
+        expected_workflow_input=workflow_input,
+    ):
+        return {
+            "reconciliation_status": "VERIFIED",
+            "execution_arn": execution_arn,
+            "execution_status": execution_lookup["execution_status"],
+        }
+
+    return {
+        "reconciliation_status": "INPUT_MISMATCH",
+        "execution_arn": execution_arn,
+    }
+
+
+def confirm_verified_trade_recovery(
+    *,
+    table: Any,
+    tenant_id: str,
+    idempotency_key: str,
+    recovery_token: str,
+    now: int,
+    reconciliation_result: Mapping[str, str],
+) -> str:
+    """
+    Confirm a recovered execution only when reconciliation is VERIFIED.
+
+    Returns:
+        START_CONFIRMED when conditional confirmation succeeds.
+        INPUT_MISMATCH when execution input differs.
+        INCONCLUSIVE when execution existence is uncertain.
+
+    Propagates DynamoDB confirmation failures.
+    """
+    status = reconciliation_result["reconciliation_status"]
+    match status:
+        case "INPUT_MISMATCH" | "INCONCLUSIVE":
+            return status
+        case "VERIFIED":
+            execution_arn = reconciliation_result["execution_arn"]
+            submission_status = confirm_submission_started(
+                table=table,
+                tenant_id=tenant_id,
+                idempotency_key=idempotency_key,
+                execution_arn=execution_arn,
+                recovery_token=recovery_token,
+                now=now,
+            )
+            return submission_status
+        case _:
+            raise ValueError(f"Invalid reconciliation status: {status}.")

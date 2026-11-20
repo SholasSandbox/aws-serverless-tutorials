@@ -13,12 +13,14 @@ import api_workflow_handoff
 from api_workflow_handoff import (
     build_execution_name,
     build_workflow_input,
+    confirm_verified_trade_recovery,
     coordinate_initial_trade_start,
     derive_execution_arn,
     describe_trade_execution,
     execution_input_matches,
     extract_authenticated_tenant_id,
     handle_trade_submission,
+    inspect_trade_execution_for_recovery,
     lambda_handler,
     normalise_trade,
     register_and_claim_initial_submission,
@@ -2389,3 +2391,200 @@ def test_describe_trade_execution_rejects_missing_or_blank_input(
             step_functions_client=client,
             execution_arn=execution_arn,
         )
+
+
+def test_inspect_trade_execution_for_recovery_verifies_matching_input() -> None:
+
+    tenant_id = "TENANT-A"
+    idempotency_key = "SUBMISSION-1001"
+    trade = {"trade_id": "TRD-1001", "product": "POWER", "volume_mwh": 25}
+    execution_arn = derive_execution_arn(
+        state_machine_arn=STATE_MACHINE_ARN,
+        execution_name=build_execution_name(
+            tenant_id=tenant_id,
+            idempotency_key=idempotency_key,
+        ),
+    )
+
+    client = Mock()
+    client.describe_execution.return_value = {
+        "executionArn": execution_arn,
+        "status": "RUNNING",
+        "input": json.dumps({"trade": trade, "idempotency_key": idempotency_key}),
+    }
+
+    response = inspect_trade_execution_for_recovery(
+        step_functions_client=client,
+        state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        trade={
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        },
+    )
+    assert response == {
+        "reconciliation_status": "VERIFIED",
+        "execution_arn": execution_arn,
+        "execution_status": "RUNNING",
+    }
+
+
+def test_inspect_trade_execution_for_recovery_reports__mismatch() -> None:
+
+    tenant_id = "TENANT-A"
+    idempotency_key = "SUBMISSION-1001"
+    trade = {"trade_id": "TRD-1001", "product": "POWER", "volume_mwh": 25}
+    execution_arn = derive_execution_arn(
+        state_machine_arn=STATE_MACHINE_ARN,
+        execution_name=build_execution_name(
+            tenant_id=tenant_id,
+            idempotency_key=idempotency_key,
+        ),
+    )
+
+    client = Mock()
+    client.describe_execution.return_value = {
+        "executionArn": execution_arn,
+        "status": "RUNNING",
+        "input": json.dumps(
+            {
+                "trade": {**trade, "volume_mwh": 50},
+                "idempotency_key": idempotency_key,
+            }
+        ),
+    }
+
+    response = inspect_trade_execution_for_recovery(
+        step_functions_client=client,
+        state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        trade={
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        },
+    )
+    assert response == {
+        "reconciliation_status": "INPUT_MISMATCH",
+        "execution_arn": execution_arn,
+    }
+
+
+def test_inspect_trade_execution_for_recovery_is_inconclusive_if_not_observed() -> None:
+    tenant_id = "TENANT-A"
+    idempotency_key = "SUBMISSION-1001"
+    execution_arn = derive_execution_arn(
+        state_machine_arn=STATE_MACHINE_ARN,
+        execution_name=build_execution_name(
+            tenant_id=tenant_id,
+            idempotency_key=idempotency_key,
+        ),
+    )
+
+    client = Mock()
+    client.describe_execution.side_effect = ClientError(
+        {
+            "Error": {
+                "Code": "ExecutionDoesNotExist",
+                "Message": "Execution does not exist",
+            }
+        },
+        "DescribeExecution",
+    )
+
+    response = inspect_trade_execution_for_recovery(
+        step_functions_client=client,
+        state_machine_arn=STATE_MACHINE_ARN,
+        tenant_id=tenant_id,
+        idempotency_key=idempotency_key,
+        trade={"trade_id": "TRD-1001", "product": "POWER", "volume_mwh": 25},
+    )
+
+    assert response == {
+        "reconciliation_status": "INCONCLUSIVE",
+        "execution_arn": execution_arn,
+    }
+    client.describe_execution.assert_called_once_with(
+        executionArn=execution_arn,
+        includedData="ALL_DATA",
+    )
+
+
+def test_confirm_verified_trade_recovery_is_verified():
+    table = Mock()
+
+    execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:test-run"
+    )
+    response = confirm_verified_trade_recovery(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        recovery_token="token-A",
+        now=100,
+        reconciliation_result={
+            "reconciliation_status": "VERIFIED",
+            "execution_arn": execution_arn,
+            "execution_status": "RUNNING",
+        },
+    )
+
+    assert response == "START_CONFIRMED"
+    table.update_item.assert_called_once()
+    update_request = table.update_item.call_args.kwargs
+    assert update_request["Key"] == {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+    values = update_request["ExpressionAttributeValues"]
+    assert values[":arn"] == execution_arn
+    assert values[":status"] == "START_CONFIRMED"
+    assert values[":recovery_token"] == "token-A"
+    assert values[":now"] == 100
+
+
+def test_confirm_verified_trade_recovery_input_mismatched():
+    table = Mock()
+
+    execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:test-run"
+    )
+    response = confirm_verified_trade_recovery(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        recovery_token="token-A",
+        now=100,
+        reconciliation_result={
+            "reconciliation_status": "INPUT_MISMATCH",
+            "execution_arn": execution_arn,
+        },
+    )
+
+    assert response == "INPUT_MISMATCH"
+    assert table.mock_calls == []
+
+
+def test_confirm_verified_trade_recovery_inconclusive():
+    table = Mock()
+
+    execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:test-run"
+    )
+    response = confirm_verified_trade_recovery(
+        table=table,
+        tenant_id="TENANT-A",
+        idempotency_key="SUBMISSION-1001",
+        recovery_token="token-A",
+        now=100,
+        reconciliation_result={
+            "reconciliation_status": "INCONCLUSIVE",
+            "execution_arn": execution_arn,
+        },
+    )
+
+    assert response == "INCONCLUSIVE"
+    assert table.mock_calls == []

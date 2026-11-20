@@ -1,4 +1,4 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 import pytest
 from boto3.dynamodb.conditions import Attr
@@ -7,6 +7,7 @@ from botocore.exceptions import ClientError
 from api_workflow_handoff import normalise_trade
 from submission_registry import (
     acquire_submission_lease,
+    claim_expired_recovery_lease,
     classify_existing_submission,
     confirm_submission_started,
     fingerprint_normalised_trade,
@@ -956,3 +957,166 @@ def test_register_submission_rejects_invalid_initial_lease(
 
     assert str(exc_info.value) == expected_message
     table.put_item.assert_not_called()
+
+
+def test_claim_expired_recovery_lease_succeeded(submission_table) -> None:
+    table = submission_table
+    key = {"tenant_id": "TENANT-A", "idempotency_key": "SUBMISSION-1001"}
+
+    # Arrange: current lease has expired.
+    expected_values = {
+        "expected_recovery_token": "token-A",
+        "expected_payload_fingerprint": "<sha256-hex-digest>",
+    }
+
+    table.put_item(
+        Item={
+            **key,
+            "status": "STARTING",
+            "recovery_token": "token-A",
+            "payload_fingerprint": "<sha256-hex-digest>",
+            "lease_expires_at": 90,
+        }
+    )
+
+    response = claim_expired_recovery_lease(
+        table=table,
+        **key,
+        **expected_values,
+        new_recovery_token="token-B",
+        new_lease_expires_at=150,
+        now=100,
+    )
+    assert response == "CLAIMED"
+
+    record = table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert record["status"] == "STARTING"
+    assert record["recovery_token"] == "token-B"
+    assert record["lease_expires_at"] == 150
+
+
+def test_claim_expired_recovery_lease_failed_different_fingerprint(
+    submission_table,
+) -> None:
+    table = submission_table
+    key = {"tenant_id": "TENANT-A", "idempotency_key": "SUBMISSION-1001"}
+
+    # Arrange: current lease has expired.
+    expected_values = {
+        "expected_recovery_token": "token-A",
+        "expected_payload_fingerprint": "<sha256-hex-digest>",
+    }
+
+    table.put_item(
+        Item={
+            **key,
+            "status": "STARTING",
+            "recovery_token": "token-A",
+            "payload_fingerprint": "<sha256-hex-digest_changed>",
+            "lease_expires_at": 90,
+        }
+    )
+
+    response = claim_expired_recovery_lease(
+        table=table,
+        **key,
+        **expected_values,
+        new_recovery_token="token-B",
+        new_lease_expires_at=150,
+        now=100,
+    )
+    assert response == "NOT_CLAIMED"
+
+    record = table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert record["recovery_token"] == "token-A"
+    assert record["lease_expires_at"] == 90
+
+
+@pytest.mark.parametrize(
+    "current_lease_expires_at,new_lease_expires_at, now",
+    [
+        pytest.param(121, 150, 120, id="lease_expires_now"),
+        pytest.param(110, 110, 100, id="lease_expires_after_now"),
+    ],
+)
+def test_claim_expired_recovery_lease_failed_different_lease_not_expired(
+    submission_table,
+    current_lease_expires_at: int,
+    new_lease_expires_at: int,
+    now: int,
+) -> None:
+    table = submission_table
+    key = {"tenant_id": "TENANT-A", "idempotency_key": "SUBMISSION-1001"}
+
+    # Arrange: current lease has expired.
+    expected_values = {
+        "expected_recovery_token": "token-A",
+        "expected_payload_fingerprint": "<sha256-hex-digest>",
+    }
+
+    table.put_item(
+        Item={
+            **key,
+            "status": "STARTING",
+            "recovery_token": "token-A",
+            "payload_fingerprint": "<sha256-hex-digest>",
+            "lease_expires_at": current_lease_expires_at,
+        }
+    )
+
+    response = claim_expired_recovery_lease(
+        table=table,
+        **key,
+        **expected_values,
+        new_recovery_token="token-B",
+        new_lease_expires_at=new_lease_expires_at,
+        now=now,
+    )
+    assert response == "NOT_CLAIMED"
+
+    record = table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert record["status"] == "STARTING"
+    assert record["recovery_token"] == "token-A"
+    assert record["lease_expires_at"] == current_lease_expires_at
+
+
+def test_claim_expired_recovery_lease_failed_dynamodb_error(submission_table) -> None:
+    table = submission_table
+    key = {"tenant_id": "TENANT-A", "idempotency_key": "SUBMISSION-1001"}
+
+    # Arrange: current lease has expired.
+    expected_values = {
+        "expected_recovery_token": "token-A",
+        "expected_payload_fingerprint": "<sha256-hex-digest>",
+    }
+
+    table.put_item(
+        Item={
+            **key,
+            "status": "STARTING",
+            "recovery_token": "token-A",
+            "payload_fingerprint": "<sha256-hex-digest>",
+            "lease_expires_at": 90,
+        }
+    )
+
+    error = ClientError(
+        {"Error": {"Code": "AccessDeniedException", "Message": "Access denied"}},
+        "UpdateItem",
+    )
+
+    with patch.object(submission_table, "update_item", side_effect=error):
+        with pytest.raises(ClientError) as exc_info:
+            claim_expired_recovery_lease(
+                table=table,
+                **key,
+                **expected_values,
+                new_recovery_token="token-B",
+                new_lease_expires_at=150,
+                now=100,
+            )
+    assert exc_info.value is error
+    record = table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert record["status"] == "STARTING"
+    assert record["recovery_token"] == "token-A"
+    assert record["lease_expires_at"] == 90

@@ -232,3 +232,47 @@ def acquire_submission_lease(
     )
 
     return "RECOVERY_CLAIMED"
+
+
+def claim_expired_recovery_lease(
+    *,
+    table: Any,
+    tenant_id: str,
+    idempotency_key: str,
+    expected_recovery_token: str,
+    expected_payload_fingerprint: str,
+    new_recovery_token: str,
+    new_lease_expires_at: int,
+    now: int,
+) -> str:
+
+    try:
+        table.update_item(
+            Key={
+                "tenant_id": tenant_id,
+                "idempotency_key": idempotency_key,
+            },
+            UpdateExpression=(
+                "SET recovery_token = :new_token, lease_expires_at = :new_expiry"
+            ),
+            ConditionExpression=(
+                "#s = :starting "
+                "AND recovery_token = :expected_token "
+                "AND payload_fingerprint = :expected_fingerprint "
+                "AND lease_expires_at <= :now"
+            ),
+            ExpressionAttributeNames={"#s": "status"},
+            ExpressionAttributeValues={
+                ":starting": "STARTING",
+                ":expected_token": expected_recovery_token,
+                ":expected_fingerprint": expected_payload_fingerprint,
+                ":now": now,
+                ":new_token": new_recovery_token,
+                ":new_expiry": new_lease_expires_at,
+            },
+        )
+    except ClientError as exc:
+        if exc.response["Error"]["Code"] == "ConditionalCheckFailedException":
+            return "NOT_CLAIMED"
+        raise
+    return "CLAIMED"
