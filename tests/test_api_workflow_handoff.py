@@ -14,6 +14,7 @@ from api_workflow_handoff import (
     build_execution_name,
     build_workflow_input,
     confirm_verified_trade_recovery,
+    coordinate_expired_trade_recovery,
     coordinate_initial_trade_start,
     derive_execution_arn,
     describe_trade_execution,
@@ -2588,3 +2589,416 @@ def test_confirm_verified_trade_recovery_inconclusive():
 
     assert response == "INCONCLUSIVE"
     assert table.mock_calls == []
+
+
+def test_coordinate_expired_trade_recovery_success(submission_table) -> None:
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+    starting_record = {
+        **key,
+        "status": "STARTING",
+        "recovery_token": "token-A",
+        "lease_expires_at": 90,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+    }
+    submission_table.put_item(Item=starting_record)
+
+    execution_name = build_execution_name(**key)
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+    step_functions_client = Mock()
+    step_functions_client.describe_execution.return_value = {
+        "executionArn": expected_execution_arn,
+        "status": "RUNNING",
+        "input": json.dumps(
+            {"trade": trade, "idempotency_key": key["idempotency_key"]}
+        ),
+    }
+
+    response = coordinate_expired_trade_recovery(
+        table=submission_table,
+        step_functions_client=step_functions_client,
+        state_machine_arn=STATE_MACHINE_ARN,
+        **key,
+        trade=trade,
+        new_recovery_token="token-B",
+        new_lease_expires_at=150,
+        claim_now=100,
+        confirmation_now=110,
+    )
+
+    assert response == "START_CONFIRMED"
+    stored_record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert stored_record == {
+        **starting_record,
+        "status": "START_CONFIRMED",
+        "recovery_token": "token-B",
+        "lease_expires_at": 150,
+        "execution_arn": expected_execution_arn,
+    }
+    assert starting_record != stored_record
+    step_functions_client.describe_execution.assert_called_once_with(
+        executionArn=expected_execution_arn,
+        includedData="ALL_DATA",
+    )
+    step_functions_client.start_execution.assert_not_called()
+
+
+def test_coordinate_expired_trade_recovery_already_confirmed(submission_table) -> None:
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+
+    execution_name = build_execution_name(**key)
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+    starting_record = {
+        **key,
+        "status": "START_CONFIRMED",
+        "execution_arn": expected_execution_arn,
+        "recovery_token": "token-A",
+        "lease_expires_at": 90,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+    }
+    submission_table.put_item(Item=starting_record)
+    step_functions_client = Mock()
+
+    response = coordinate_expired_trade_recovery(
+        table=submission_table,
+        step_functions_client=step_functions_client,
+        state_machine_arn=STATE_MACHINE_ARN,
+        **key,
+        trade=trade,
+        new_recovery_token="token-B",
+        new_lease_expires_at=150,
+        claim_now=100,
+        confirmation_now=110,
+    )
+
+    assert response == "ALREADY_CONFIRMED"
+    stored_record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert stored_record == {
+        **starting_record,
+        "status": "START_CONFIRMED",
+        "recovery_token": "token-A",
+        "lease_expires_at": 90,
+        "execution_arn": expected_execution_arn,
+    }
+    assert starting_record == stored_record
+    step_functions_client.describe_execution.assert_not_called()
+    step_functions_client.start_execution.assert_not_called()
+
+
+def test_coordinate_expired_trade_recovery_payload_fingerprint_conflict(
+    submission_table,
+) -> None:
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+
+    execution_name = build_execution_name(**key)
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+    starting_record = {
+        **key,
+        "status": "STARTING",
+        "execution_arn": expected_execution_arn,
+        "recovery_token": "token-A",
+        "lease_expires_at": 90,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+    }
+    submission_table.put_item(Item=starting_record)
+    step_functions_client = Mock()
+
+    response = coordinate_expired_trade_recovery(
+        table=submission_table,
+        step_functions_client=step_functions_client,
+        state_machine_arn=STATE_MACHINE_ARN,
+        **key,
+        trade={**trade, "volume_mwh": 50},
+        new_recovery_token="token-B",
+        new_lease_expires_at=150,
+        claim_now=100,
+        confirmation_now=110,
+    )
+
+    assert response == "CONFLICT"
+    stored_record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert starting_record == stored_record
+    step_functions_client.describe_execution.assert_not_called()
+    step_functions_client.start_execution.assert_not_called()
+
+
+def test_coordinate_expired_trade_recovery_not_claimed(submission_table) -> None:
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+
+    execution_name = build_execution_name(**key)
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+    starting_record = {
+        **key,
+        "status": "STARTING",
+        "execution_arn": expected_execution_arn,
+        "recovery_token": "token-A",
+        "lease_expires_at": 110,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+    }
+    submission_table.put_item(Item=starting_record)
+    step_functions_client = Mock()
+    step_functions_client.describe_execution.return_value = {
+        "executionArn": expected_execution_arn,
+        "status": "RUNNING",
+        "input": json.dumps(
+            {"trade": trade, "idempotency_key": key["idempotency_key"]}
+        ),
+    }
+    with patch.object(
+        submission_table, "update_item", wraps=submission_table.update_item
+    ) as update_item:
+        response = coordinate_expired_trade_recovery(
+            table=submission_table,
+            step_functions_client=step_functions_client,
+            state_machine_arn=STATE_MACHINE_ARN,
+            **key,
+            trade=trade,
+            new_recovery_token="token-B",
+            new_lease_expires_at=150,
+            claim_now=100,
+            confirmation_now=110,
+        )
+
+    update_item.assert_called_once()
+    assert response == "NOT_CLAIMED"
+    stored_record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert starting_record == stored_record
+    step_functions_client.describe_execution.assert_not_called()
+    step_functions_client.start_execution.assert_not_called()
+
+
+def test_coordinate_expired_trade_recovery_inconclusive(submission_table) -> None:
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+    starting_record = {
+        **key,
+        "status": "STARTING",
+        "recovery_token": "token-A",
+        "lease_expires_at": 90,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+    }
+    submission_table.put_item(Item=starting_record)
+
+    execution_name = build_execution_name(**key)
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+    step_functions_client = Mock()
+    step_functions_client.describe_execution.side_effect = ClientError(
+        {
+            "Error": {
+                "Code": "ExecutionDoesNotExist",
+                "Message": "Execution Does Not Exist",
+            }
+        },
+        "describe_execution",
+    )
+    with patch.object(
+        submission_table, "update_item", wraps=submission_table.update_item
+    ) as update_item:
+        response = coordinate_expired_trade_recovery(
+            table=submission_table,
+            step_functions_client=step_functions_client,
+            state_machine_arn=STATE_MACHINE_ARN,
+            **key,
+            trade=trade,
+            new_recovery_token="token-B",
+            new_lease_expires_at=150,
+            claim_now=100,
+            confirmation_now=110,
+        )
+
+    assert response == "INCONCLUSIVE"
+    update_item.assert_called_once()
+    stored_record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert stored_record == {
+        **starting_record,
+        "status": "STARTING",
+        "recovery_token": "token-B",
+        "lease_expires_at": 150,
+        #        "execution_arn": expected_execution_arn,
+    }
+    assert starting_record != stored_record
+    step_functions_client.describe_execution.assert_called_once_with(
+        executionArn=expected_execution_arn,
+        includedData="ALL_DATA",
+    )
+    step_functions_client.start_execution.assert_not_called()
+
+
+def test_coordinate_expired_trade_recovery_execution_mismatch(submission_table) -> None:
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+    starting_record = {
+        **key,
+        "status": "STARTING",
+        "recovery_token": "token-A",
+        "lease_expires_at": 90,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+    }
+    submission_table.put_item(Item=starting_record)
+
+    execution_name = build_execution_name(**key)
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+
+    step_functions_client = Mock()
+    step_functions_client.describe_execution.return_value = {
+        "executionArn": expected_execution_arn,
+        "status": "RUNNING",
+        "input": json.dumps(
+            {
+                "trade": {**trade, "volume_mwh": 50},
+                "idempotency_key": key["idempotency_key"],
+            }
+        ),
+    }
+    with patch.object(
+        submission_table, "update_item", wraps=submission_table.update_item
+    ) as update_item:
+        response = coordinate_expired_trade_recovery(
+            table=submission_table,
+            step_functions_client=step_functions_client,
+            state_machine_arn=STATE_MACHINE_ARN,
+            **key,
+            trade=trade,
+            new_recovery_token="token-B",
+            new_lease_expires_at=150,
+            claim_now=100,
+            confirmation_now=110,
+        )
+
+    assert response == "INPUT_MISMATCH"
+    update_item.assert_called_once()
+    stored_record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert stored_record == {
+        **starting_record,
+        "status": "STARTING",
+        "recovery_token": "token-B",
+        "lease_expires_at": 150,
+        #        "execution_arn": expected_execution_arn,
+    }
+    assert starting_record != stored_record
+    step_functions_client.describe_execution.assert_called_once_with(
+        executionArn=expected_execution_arn,
+        includedData="ALL_DATA",
+    )
+    step_functions_client.start_execution.assert_not_called()
+
+
+def test_coordinate_expired_trade_recovery_confirmed_payload_conflict(
+    submission_table,
+) -> None:
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+
+    execution_name = build_execution_name(**key)
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+    starting_record = {
+        **key,
+        "status": "START_CONFIRMED",
+        "execution_arn": expected_execution_arn,
+        "recovery_token": "token-A",
+        "lease_expires_at": 90,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+    }
+    submission_table.put_item(Item=starting_record)
+    step_functions_client = Mock()
+
+    with patch.object(
+        submission_table, "update_item", wraps=submission_table.update_item
+    ) as update_item:
+        response = coordinate_expired_trade_recovery(
+            table=submission_table,
+            step_functions_client=step_functions_client,
+            state_machine_arn=STATE_MACHINE_ARN,
+            **key,
+            trade={**trade, "volume_mwh": 50},
+            new_recovery_token="token-B",
+            new_lease_expires_at=150,
+            claim_now=100,
+            confirmation_now=110,
+        )
+    assert response == "CONFLICT"
+    update_item.assert_not_called()
+    stored_record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert starting_record == stored_record
+    step_functions_client.describe_execution.assert_not_called()
+    step_functions_client.start_execution.assert_not_called()

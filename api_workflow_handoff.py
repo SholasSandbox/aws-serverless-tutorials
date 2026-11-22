@@ -29,9 +29,11 @@ from botocore.exceptions import (
 )
 
 from submission_registry import (
+    claim_expired_recovery_lease,
     classify_existing_submission,
     confirm_submission_started,
     fingerprint_normalised_trade,
+    get_submission_record,
     register_submission,
 )
 from trade_validation import (
@@ -765,3 +767,75 @@ def confirm_verified_trade_recovery(
             return submission_status
         case _:
             raise ValueError(f"Invalid reconciliation status: {status}.")
+
+
+def coordinate_expired_trade_recovery(
+    *,
+    table: Any,
+    step_functions_client: Any,
+    state_machine_arn: str,
+    tenant_id: str,
+    idempotency_key: str,
+    trade: Mapping[str, Any],
+    new_recovery_token: str,
+    new_lease_expires_at: int,
+    claim_now: int,
+    confirmation_now: int,
+) -> str:
+    """
+    Coordinate recovery of an existing trade submission.
+
+    Returns:
+        START_CONFIRMED
+        INPUT_MISMATCH
+        INCONCLUSIVE
+        NOT_CLAIMED
+        CONFLICT
+        ALREADY_CONFIRMED
+
+    Propagates unexpected AWS and validation errors.
+
+    Never starts a new Step Functions execution.
+    """
+    record = get_submission_record(
+        table=table,
+        tenant_id=tenant_id,
+        idempotency_key=idempotency_key,
+    )
+
+    stored_fingerprint = record.get("payload_fingerprint")
+    if stored_fingerprint != fingerprint_normalised_trade(trade=trade):
+        return "CONFLICT"
+
+    if record.get("status") == "START_CONFIRMED":
+        return "ALREADY_CONFIRMED"
+
+    lease_claim = claim_expired_recovery_lease(
+        table=table,
+        tenant_id=tenant_id,
+        idempotency_key=idempotency_key,
+        expected_recovery_token=record.get("recovery_token"),
+        expected_payload_fingerprint=stored_fingerprint,
+        new_recovery_token=new_recovery_token,
+        new_lease_expires_at=new_lease_expires_at,
+        now=claim_now,
+    )
+    if lease_claim == "NOT_CLAIMED":
+        return lease_claim
+
+    reconciliation_result = inspect_trade_execution_for_recovery(
+        step_functions_client=step_functions_client,
+        state_machine_arn=state_machine_arn,
+        tenant_id=tenant_id,
+        idempotency_key=idempotency_key,
+        trade=trade,
+    )
+    confirmation = confirm_verified_trade_recovery(
+        table=table,
+        tenant_id=tenant_id,
+        idempotency_key=idempotency_key,
+        recovery_token=new_recovery_token,
+        now=confirmation_now,
+        reconciliation_result=reconciliation_result,
+    )
+    return confirmation
