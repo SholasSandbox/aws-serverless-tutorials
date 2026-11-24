@@ -16,6 +16,7 @@ from api_workflow_handoff import (
     confirm_verified_trade_recovery,
     coordinate_expired_trade_recovery,
     coordinate_initial_trade_start,
+    coordinate_trade_submission,
     derive_execution_arn,
     describe_trade_execution,
     execution_input_matches,
@@ -23,6 +24,7 @@ from api_workflow_handoff import (
     handle_trade_submission,
     inspect_trade_execution_for_recovery,
     lambda_handler,
+    map_trade_submission_outcome,
     normalise_trade,
     register_and_claim_initial_submission,
     register_trade_for_handoff,
@@ -54,7 +56,7 @@ def make_event(
     }
 
 
-def test_valid_request_starts_workflow_with_normalised_input() -> None:
+def test_valid_request_starts_workflow_with_normalised_input(submission_table) -> None:
     client = Mock()
     client.start_execution.return_value = {
         "executionArn": "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:example",
@@ -67,6 +69,11 @@ def test_valid_request_starts_workflow_with_normalised_input() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     assert response["statusCode"] == 202
@@ -86,7 +93,7 @@ def test_valid_request_starts_workflow_with_normalised_input() -> None:
     assert "headers" not in json.loads(call["input"])
 
 
-def test_valid_request_returns_truthful_accepted_response() -> None:
+def test_valid_request_returns_truthful_accepted_response(submission_table) -> None:
     client = Mock()
     client.start_execution.return_value = {
         "executionArn": "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:example",
@@ -99,6 +106,11 @@ def test_valid_request_returns_truthful_accepted_response() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     body = json.loads(response["body"])
@@ -107,7 +119,7 @@ def test_valid_request_returns_truthful_accepted_response() -> None:
     assert "processed successfully" not in response["body"].lower()
 
 
-def test_invalid_json_returns_400_without_starting_workflow() -> None:
+def test_invalid_json_returns_400_without_starting_workflow(submission_table) -> None:
     client = Mock()
 
     response = handle_trade_submission(
@@ -116,13 +128,20 @@ def test_invalid_json_returns_400_without_starting_workflow() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     assert response["statusCode"] == 400
     client.start_execution.assert_not_called()
 
 
-def test_non_object_json_returns_400_without_starting_workflow() -> None:
+def test_non_object_json_returns_400_without_starting_workflow(
+    submission_table,
+) -> None:
     client = Mock()
 
     response = handle_trade_submission(
@@ -131,13 +150,20 @@ def test_non_object_json_returns_400_without_starting_workflow() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     assert response["statusCode"] == 400
     client.start_execution.assert_not_called()
 
 
-def test_base64_encoded_json_body_is_decoded_before_workflow_start() -> None:
+def test_base64_encoded_json_body_is_decoded_before_workflow_start(
+    submission_table,
+) -> None:
     client = Mock()
     client.start_execution.return_value = {
         "executionArn": "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:example",
@@ -156,12 +182,19 @@ def test_base64_encoded_json_body_is_decoded_before_workflow_start() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     assert response["statusCode"] == 202
 
 
-def test_missing_trade_field_returns_400_without_starting_workflow() -> None:
+def test_missing_trade_field_returns_400_without_starting_workflow(
+    submission_table,
+) -> None:
     client = Mock()
 
     response = handle_trade_submission(
@@ -170,6 +203,11 @@ def test_missing_trade_field_returns_400_without_starting_workflow() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     assert response["statusCode"] == 400
@@ -177,7 +215,7 @@ def test_missing_trade_field_returns_400_without_starting_workflow() -> None:
     client.start_execution.assert_not_called()
 
 
-def test_external_fields_are_not_passed_to_workflow() -> None:
+def test_external_fields_are_not_passed_to_workflow(submission_table) -> None:
     client = Mock()
     client.start_execution.return_value = {
         "executionArn": "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:example",
@@ -195,6 +233,11 @@ def test_external_fields_are_not_passed_to_workflow() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     assert response["statusCode"] == 202
@@ -202,7 +245,7 @@ def test_external_fields_are_not_passed_to_workflow() -> None:
     assert "unexpected_external_field" not in workflow_input["trade"]
 
 
-def test_missing_idempotency_key_returns_400() -> None:
+def test_missing_idempotency_key_returns_400(submission_table) -> None:
     client = Mock()
 
     response = handle_trade_submission(
@@ -211,13 +254,18 @@ def test_missing_idempotency_key_returns_400() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     assert response["statusCode"] == 400
     client.start_execution.assert_not_called()
 
 
-def test_retryable_step_functions_failure_returns_503_not_202() -> None:
+def test_retryable_step_functions_failure_returns_503_not_202(submission_table) -> None:
     client = Mock()
     client.start_execution.side_effect = ClientError(
         {
@@ -235,6 +283,11 @@ def test_retryable_step_functions_failure_returns_503_not_202() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     body = json.loads(response["body"])
@@ -243,7 +296,7 @@ def test_retryable_step_functions_failure_returns_503_not_202() -> None:
     assert "Rate exceeded" not in response["body"]
 
 
-def test_duplicate_execution_name_returns_client_safe_409() -> None:
+def test_duplicate_execution_name_returns_client_safe_409(submission_table) -> None:
     client = Mock()
     client.start_execution.side_effect = ClientError(
         {
@@ -261,13 +314,20 @@ def test_duplicate_execution_name_returns_client_safe_409() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     assert response["statusCode"] == 409
     assert "Execution already exists" not in response["body"]
 
 
-def test_permission_failure_returns_500_without_leaking_aws_details() -> None:
+def test_permission_failure_returns_500_without_leaking_aws_details(
+    submission_table,
+) -> None:
     client = Mock()
     client.start_execution.side_effect = ClientError(
         {
@@ -285,13 +345,20 @@ def test_permission_failure_returns_500_without_leaking_aws_details() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     assert response["statusCode"] == 500
     assert "role arn and account details" not in response["body"]
 
 
-def test_connection_failure_returns_503_without_leaking_endpoint() -> None:
+def test_connection_failure_returns_503_without_leaking_endpoint(
+    submission_table,
+) -> None:
     client = Mock()
     client.start_execution.side_effect = EndpointConnectionError(
         endpoint_url="https://states.example.internal"
@@ -303,13 +370,20 @@ def test_connection_failure_returns_503_without_leaking_endpoint() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     assert response["statusCode"] == 503
     assert "states.example.internal" not in response["body"]
 
 
-def test_unexpected_start_failure_returns_500_without_leaking_details() -> None:
+def test_unexpected_start_failure_returns_500_without_leaking_details(
+    submission_table,
+) -> None:
     client = Mock()
     client.start_execution.side_effect = RuntimeError("sensitive internal detail")
 
@@ -319,13 +393,20 @@ def test_unexpected_start_failure_returns_500_without_leaking_details() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     assert response["statusCode"] == 500
     assert "sensitive internal detail" not in response["body"]
 
 
-def test_missing_state_machine_configuration_returns_500_without_sdk_call() -> None:
+def test_missing_state_machine_configuration_returns_500_without_sdk_call(
+    submission_table,
+) -> None:
     client = Mock()
 
     response = handle_trade_submission(
@@ -334,6 +415,11 @@ def test_missing_state_machine_configuration_returns_500_without_sdk_call() -> N
         step_functions_client=client,
         state_machine_arn="",
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     assert response["statusCode"] == 500
@@ -431,7 +517,9 @@ def test_execution_name_is_step_functions_compatible(
     )
 
 
-def test_retry_with_same_idempotency_key_has_stable_workflow_input() -> None:
+def test_retry_with_same_idempotency_key_has_stable_workflow_input(
+    submission_table,
+) -> None:
     client = Mock()
     client.start_execution.return_value = {
         "executionArn": "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:example",
@@ -446,7 +534,7 @@ def test_retry_with_same_idempotency_key_has_stable_workflow_input() -> None:
         }
     )
 
-    handle_trade_submission(
+    first_response = handle_trade_submission(
         make_event(
             body=request_body,
             headers={"Idempotency-Key": "SUBMISSION-1001"},
@@ -456,9 +544,14 @@ def test_retry_with_same_idempotency_key_has_stable_workflow_input() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
-    handle_trade_submission(
+    retry_response = handle_trade_submission(
         make_event(
             body=request_body,
             headers={"Idempotency-Key": "SUBMISSION-1001"},
@@ -468,30 +561,39 @@ def test_retry_with_same_idempotency_key_has_stable_workflow_input() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-B",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
-    assert client.start_execution.call_count == 2
+    assert client.start_execution.call_count == 1
 
     calls = client.start_execution.call_args_list
 
     first_call = calls[0].kwargs
-    second_call = calls[1].kwargs
 
     expected_execution_name = build_execution_name("TENANT-A", "SUBMISSION-1001")
 
     assert first_call["name"] == expected_execution_name
-    assert first_call["name"] == second_call["name"]
-    assert first_call["input"] == second_call["input"]
 
     assert first_call["stateMachineArn"] == STATE_MACHINE_ARN
-    assert second_call["stateMachineArn"] == STATE_MACHINE_ARN
+    assert first_response["statusCode"] == 202
+    assert retry_response["statusCode"] == 200
+
+    first_body = json.loads(first_response["body"])
+    retry_body = json.loads(retry_response["body"])
+    assert retry_body["status"] == "already_accepted"
+    assert retry_body["operation_id"] == first_body["operation_id"]
+    client.start_execution.assert_called_once()
 
     workflow_input = json.loads(first_call["input"])
 
     assert workflow_input["trade"]["trade_id"] == "TRD-1001"
 
 
-def test_changed_volume_same_key_changes_workflow_input() -> None:
+def test_changed_volume_same_key_returns_idempotency_conflict(submission_table) -> None:
     client = Mock()
     client.start_execution.return_value = {
         "executionArn": "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:example",
@@ -506,7 +608,7 @@ def test_changed_volume_same_key_changes_workflow_input() -> None:
         }
     )
 
-    handle_trade_submission(
+    first_response = handle_trade_submission(
         make_event(
             body=request_body_a,
             headers={"Idempotency-Key": "SUBMISSION-1001"},
@@ -516,6 +618,11 @@ def test_changed_volume_same_key_changes_workflow_input() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
     request_body_b = json.dumps(
@@ -526,7 +633,7 @@ def test_changed_volume_same_key_changes_workflow_input() -> None:
         }
     )
 
-    handle_trade_submission(
+    conflict_response = handle_trade_submission(
         make_event(
             body=request_body_b,
             headers={"Idempotency-Key": "SUBMISSION-1001"},
@@ -536,31 +643,33 @@ def test_changed_volume_same_key_changes_workflow_input() -> None:
         step_functions_client=client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=submission_table,
+        recovery_token="token-B",
+        lease_expires_at=150,
+        now=100,
+        confirmation_now=110,
     )
 
-    assert client.start_execution.call_count == 2
+    assert client.start_execution.call_count == 1
 
     calls = client.start_execution.call_args_list
 
     first_call = calls[0].kwargs
-    second_call = calls[1].kwargs
 
     expected_execution_name = build_execution_name("TENANT-A", "SUBMISSION-1001")
 
     assert first_call["name"] == expected_execution_name
-    assert first_call["name"] == second_call["name"]
-    assert first_call["input"] != second_call["input"]
 
     workflow_a_input = json.loads(first_call["input"])
     assert workflow_a_input["trade"]["volume_mwh"] == 25
 
-    workflow_b_input = json.loads(second_call["input"])
-    assert workflow_b_input["trade"]["volume_mwh"] == 50
+    assert first_response["statusCode"] == 202
+    assert conflict_response["statusCode"] == 409
+    assert json.loads(conflict_response["body"])["error"] == "idempotency_key_conflict"
 
-    assert (
-        workflow_a_input["trade"]["trade_id"] == workflow_b_input["trade"]["trade_id"]
-    )
-    assert workflow_a_input["trade"]["product"] == workflow_b_input["trade"]["product"]
+    client.start_execution.assert_called_once()
+    start_args = client.start_execution.call_args.kwargs
+    assert json.loads(start_args["input"])["trade"]["volume_mwh"] == 25
 
 
 def test_register_trade_for_handoff_creates_submission(submission_table):
@@ -3002,3 +3111,501 @@ def test_coordinate_expired_trade_recovery_confirmed_payload_conflict(
     assert starting_record == stored_record
     step_functions_client.describe_execution.assert_not_called()
     step_functions_client.start_execution.assert_not_called()
+
+
+def test_coordinate_trade_submission_returned_starts_new_trade(
+    submission_table,
+) -> None:
+    table = submission_table
+
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+    execution_name = build_execution_name(**key)
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+    step_functions_client = Mock()
+    step_functions_client.start_execution.return_value = {
+        "executionArn": expected_execution_arn,
+        "startDate": "2026-01-01T00:00:00Z",
+    }
+
+    with patch.object(
+        submission_table, "update_item", wraps=submission_table.update_item
+    ) as update_item:
+        response = coordinate_trade_submission(
+            table=table,
+            step_functions_client=step_functions_client,
+            state_machine_arn=STATE_MACHINE_ARN,
+            **key,
+            trade=trade,
+            recovery_token="token-A",
+            lease_expires_at=150,
+            confirmation_now=120,
+            now=80,
+        )
+
+    assert response == {
+        "status": "START_CONFIRMED",
+        "execution_arn": expected_execution_arn,
+    }
+
+    update_item.assert_called_once()
+    record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert record["status"] == "START_CONFIRMED"
+    assert record["execution_arn"] == expected_execution_arn
+    step_functions_client.start_execution.assert_called_once()
+    step_functions_client.describe_execution.assert_not_called()
+
+
+def test_coordinate_trade_submission_already_confirmed(
+    submission_table,
+) -> None:
+    table = submission_table
+
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+    execution_name = build_execution_name(**key)
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+    step_functions_client = Mock()
+    starting_record = {
+        **key,
+        "status": "START_CONFIRMED",
+        "execution_arn": expected_execution_arn,
+        "recovery_token": "token-A",
+        "lease_expires_at": 90,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+    }
+    submission_table.put_item(Item=starting_record)
+
+    with patch.object(
+        submission_table, "update_item", wraps=submission_table.update_item
+    ) as update_item:
+        response = coordinate_trade_submission(
+            table=table,
+            step_functions_client=step_functions_client,
+            state_machine_arn=STATE_MACHINE_ARN,
+            **key,
+            trade=trade,
+            recovery_token="token-A",
+            lease_expires_at=150,
+            confirmation_now=120,
+            now=100,
+        )
+
+    assert response == {"status": "ALREADY_CONFIRMED"}
+
+    update_item.assert_not_called()
+    record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert record["status"] == "START_CONFIRMED"
+    assert record["execution_arn"] == expected_execution_arn
+    step_functions_client.start_execution.assert_not_called()
+    step_functions_client.describe_execution.assert_not_called()
+
+
+def test_coordinate_trade_submission_returned_recover_claim(
+    submission_table,
+) -> None:
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+    execution_name = build_execution_name(**key)
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+    step_functions_client = Mock()
+    step_functions_client.describe_execution.return_value = {
+        "executionArn": expected_execution_arn,
+        "status": "RUNNING",
+        "input": json.dumps(
+            {
+                "trade": trade,
+                "idempotency_key": key["idempotency_key"],
+            }
+        ),
+    }
+    starting_record = {
+        **key,
+        "status": "STARTING",
+        "recovery_token": "token-A",
+        "lease_expires_at": 90,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+    }
+    submission_table.put_item(Item=starting_record)
+
+    with patch.object(
+        submission_table, "update_item", wraps=submission_table.update_item
+    ) as update_item:
+        response = coordinate_trade_submission(
+            table=submission_table,
+            step_functions_client=step_functions_client,
+            state_machine_arn=STATE_MACHINE_ARN,
+            **key,
+            trade=trade,
+            recovery_token="token-B",
+            lease_expires_at=150,
+            confirmation_now=120,
+            now=100,
+        )
+
+    assert response == {"status": "START_CONFIRMED"}
+
+    assert update_item.call_count == 2
+    record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert record == {
+        **starting_record,
+        "status": "START_CONFIRMED",
+        "execution_arn": expected_execution_arn,
+        "recovery_token": "token-B",
+        "lease_expires_at": 150,
+    }
+    step_functions_client.describe_execution.assert_called_once_with(
+        executionArn=expected_execution_arn,
+        includedData="ALL_DATA",
+    )
+    step_functions_client.start_execution.assert_not_called()
+
+
+def test_coordinate_trade_submission_execution_not_observed(
+    submission_table,
+) -> None:
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+    execution_name = build_execution_name(**key)
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+    step_functions_client = Mock()
+    step_functions_client.describe_execution.side_effect = ClientError(
+        {
+            "Error": {
+                "Code": "ExecutionDoesNotExist",
+                "Message": "Execution Does Not Exist",
+            }
+        },
+        "describe_execution",
+    )
+    starting_record = {
+        **key,
+        "status": "STARTING",
+        "recovery_token": "token-A",
+        "lease_expires_at": 90,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+    }
+    submission_table.put_item(Item=starting_record)
+
+    with patch.object(
+        submission_table, "update_item", wraps=submission_table.update_item
+    ) as update_item:
+        response = coordinate_trade_submission(
+            table=submission_table,
+            step_functions_client=step_functions_client,
+            state_machine_arn=STATE_MACHINE_ARN,
+            **key,
+            trade=trade,
+            recovery_token="token-B",
+            lease_expires_at=150,
+            confirmation_now=120,
+            now=100,
+        )
+
+    assert response == {"status": "INCONCLUSIVE"}
+
+    assert update_item.call_count == 1
+    record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert record == {
+        **starting_record,
+        "status": "STARTING",
+        "recovery_token": "token-B",
+        "lease_expires_at": 150,
+    }
+    step_functions_client.describe_execution.assert_called_once_with(
+        executionArn=expected_execution_arn,
+        includedData="ALL_DATA",
+    )
+    step_functions_client.start_execution.assert_not_called()
+
+
+def test_map_trade_submission_outcome_start_confirmed() -> None:
+    outcome = {
+        "status": "START_CONFIRMED",
+        "execution_arn": (
+            "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:test-run"
+        ),
+    }
+    response = map_trade_submission_outcome(
+        outcome=outcome, operation_id="trade-submit-abc123", correlation_id="CORR-123"
+    )
+
+    assert response["statusCode"] == 202
+    body = json.loads(response["body"])
+    assert body["status"] == "accepted_for_processing"
+    assert body["operation_id"] == "trade-submit-abc123"
+    assert body["correlation_id"] == "CORR-123"
+    headers = response["headers"]
+    assert headers["content-type"] == "application/json"
+    assert headers["x-correlation-id"] == "CORR-123"
+
+
+def test_map_trade_submission_outcome_conflict() -> None:
+    outcome = {
+        "status": "CONFLICT",
+    }
+    response = map_trade_submission_outcome(
+        outcome=outcome, operation_id="trade-submit-abc123", correlation_id="CORR-123"
+    )
+
+    assert response["statusCode"] == 409
+    body = json.loads(response["body"])
+    assert body["error"] == "idempotency_key_conflict"
+    assert body["operation_id"] == "trade-submit-abc123"
+    assert body["correlation_id"] == "CORR-123"
+    headers = response["headers"]
+    assert headers["content-type"] == "application/json"
+    assert headers["x-correlation-id"] == "CORR-123"
+
+
+def test_map_trade_submission_outcome_already_confirmed() -> None:
+    outcome = {
+        "status": "ALREADY_CONFIRMED",
+        "execution_arn": (
+            "arn:aws:states:eu-west-2:123456789012:execution:trade-processing:test-run"
+        ),
+    }
+    response = map_trade_submission_outcome(
+        outcome=outcome, operation_id="trade-submit-abc123", correlation_id="CORR-123"
+    )
+
+    assert response["statusCode"] == 200
+    body = json.loads(response["body"])
+    assert body["status"] == "already_accepted"
+    assert body["operation_id"] == "trade-submit-abc123"
+    assert body["correlation_id"] == "CORR-123"
+    headers = response["headers"]
+    assert headers["content-type"] == "application/json"
+    assert headers["x-correlation-id"] == "CORR-123"
+
+
+def test_map_trade_submission_outcome_not_claimed() -> None:
+    outcome = {
+        "status": "NOT_CLAIMED",
+    }
+    response = map_trade_submission_outcome(
+        outcome=outcome, operation_id="trade-submit-abc123", correlation_id="CORR-123"
+    )
+
+    assert response["statusCode"] == 202
+    body = json.loads(response["body"])
+    assert body["status"] == "confirmation_pending"
+    assert body["operation_id"] == "trade-submit-abc123"
+    assert body["correlation_id"] == "CORR-123"
+    headers = response["headers"]
+    assert headers["content-type"] == "application/json"
+    assert headers["x-correlation-id"] == "CORR-123"
+
+
+def test_map_trade_submission_outcome_inconclusive() -> None:
+    outcome = {
+        "status": "INCONCLUSIVE",
+    }
+    response = map_trade_submission_outcome(
+        outcome=outcome, operation_id="trade-submit-abc123", correlation_id="CORR-123"
+    )
+
+    assert response["statusCode"] == 503
+    body = json.loads(response["body"])
+    assert body["error"] == "start_status_unknown"
+    assert body["operation_id"] == "trade-submit-abc123"
+    assert body["correlation_id"] == "CORR-123"
+    headers = response["headers"]
+    assert headers["content-type"] == "application/json"
+    assert headers["x-correlation-id"] == "CORR-123"
+
+
+def test_map_trade_submission_outcome_input_mismatch() -> None:
+    outcome = {
+        "status": "INPUT_MISMATCH",
+    }
+    response = map_trade_submission_outcome(
+        outcome=outcome, operation_id="trade-submit-abc123", correlation_id="CORR-123"
+    )
+
+    assert response["statusCode"] == 500
+    body = json.loads(response["body"])
+    assert body["error"] == "submission_verification_failed"
+    assert body["operation_id"] == "trade-submit-abc123"
+    assert body["correlation_id"] == "CORR-123"
+    headers = response["headers"]
+    assert headers["content-type"] == "application/json"
+    assert headers["x-correlation-id"] == "CORR-123"
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        pytest.param(None, id="null-input"),
+        pytest.param("", id="empty-input"),
+        pytest.param("INVALID", id="whitespace-only-input"),
+        pytest.param(123, id="non-string-input"),
+    ],
+)
+def test_map_trade_submission_outcome_unknown_status(status: str) -> None:
+    outcome = {
+        "status": status,
+    }
+
+    with pytest.raises(
+        ValueError, match=f"Unexpected trade submission outcome: {outcome['status']!r}."
+    ):
+        map_trade_submission_outcome(
+            outcome=outcome,
+            operation_id="trade-submit-abc123",
+            correlation_id="CORR-123",
+        )
+
+
+def test_coordinate_trade_submission_routes_match_to_recovery(submission_table) -> None:
+
+    common = {
+        "table": submission_table,
+        "step_functions_client": Mock(),
+        "state_machine_arn": STATE_MACHINE_ARN,
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+        "trade": {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        },
+    }
+
+    with (
+        patch(
+            "api_workflow_handoff.coordinate_initial_trade_start",
+            autospec=True,
+            return_value={"status": "MATCH"},
+        ) as initial_start,
+        patch(
+            "api_workflow_handoff.coordinate_expired_trade_recovery",
+            autospec=True,
+            return_value="START_CONFIRMED",
+        ) as recover,
+    ):
+        response = coordinate_trade_submission(
+            **common,
+            recovery_token="token-B",
+            lease_expires_at=130,
+            now=100,
+            confirmation_now=110,
+        )
+
+    initial_start.assert_called_once()
+    recover.assert_called_once_with(
+        **common,
+        new_recovery_token="token-B",
+        new_lease_expires_at=130,
+        claim_now=100,
+        confirmation_now=110,
+    )
+    assert response == {"status": "START_CONFIRMED"}
+
+
+@pytest.mark.parametrize(
+    ("outcome", "expected_status_code", "body_field", "expected_value"),
+    [
+        pytest.param(
+            {
+                "status": "START_CONFIRMED",
+                "execution_arn": (
+                    "arn:aws:states:eu-west-2:123456789012:"
+                    "execution:trade-processing:test-run"
+                ),
+            },
+            202,
+            "status",
+            "accepted_for_processing",
+            id="start-confirmed",
+        ),
+        pytest.param(
+            {"status": "INPUT_MISMATCH"},
+            500,
+            "error",
+            "submission_verification_failed",
+            id="input-mismatch",
+        ),
+    ],
+)
+def test_handle_trade_submission_maps_coordinator_outcome(
+    outcome: dict[str, str],
+    expected_status_code: int,
+    body_field: str,
+    expected_value: str,
+) -> None:
+    handler_kwargs = {
+        "table": Mock(),
+        "step_functions_client": Mock(),
+        "state_machine_arn": STATE_MACHINE_ARN,
+        "tenant_id": "TENANT-A",
+        "recovery_token": "token-A",
+        "lease_expires_at": 150,
+        "now": 100,
+        "confirmation_now": 110,
+    }
+
+    with patch(
+        "api_workflow_handoff.coordinate_trade_submission",
+        autospec=True,
+        return_value=outcome,
+    ) as coordinate:
+        response = handle_trade_submission(make_event(), None, **handler_kwargs)
+
+    coordinate.assert_called_once_with(
+        **handler_kwargs,
+        idempotency_key="submission-001",
+        trade={"trade_id": "TRD-1001", "product": "POWER", "volume_mwh": 25},
+    )
+    handler_kwargs["step_functions_client"].start_execution.assert_not_called()
+    assert handler_kwargs["step_functions_client"].mock_calls == []
+    assert handler_kwargs["table"].mock_calls == []
+    assert response["statusCode"] == expected_status_code
+    assert json.loads(response["body"])[body_field] == expected_value
+    headers = response["headers"]
+    assert headers["content-type"] == "application/json"
+    assert headers["x-correlation-id"] == "CORR-123"

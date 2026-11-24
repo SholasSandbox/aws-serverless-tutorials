@@ -272,6 +272,11 @@ def handle_trade_submission(
     step_functions_client: Any,
     state_machine_arn: str,
     tenant_id: str,
+    table: Any,
+    recovery_token: str,
+    lease_expires_at: int,
+    now: int,
+    confirmation_now: int,
 ) -> dict[str, Any]:
     """Translate an HTTP request into an asynchronous workflow start."""
     request_id = extract_request_id(event, context)
@@ -302,10 +307,6 @@ def handle_trade_submission(
     execution_name = build_execution_name(
         tenant_id=tenant_id, idempotency_key=idempotency_key
     )
-    workflow_input = build_workflow_input(
-        trade=trade,
-        idempotency_key=idempotency_key,
-    )
 
     if not state_machine_arn.strip():
         LOGGER.error(
@@ -322,15 +323,22 @@ def handle_trade_submission(
         )
 
     try:
-        workflow_start = start_trade_workflow(
+        coordination_result = coordinate_trade_submission(
+            table=table,
             step_functions_client=step_functions_client,
             state_machine_arn=state_machine_arn,
-            execution_name=execution_name,
-            workflow_input=workflow_input,
+            tenant_id=tenant_id,
+            idempotency_key=idempotency_key,
+            trade=trade,
+            recovery_token=recovery_token,
+            lease_expires_at=lease_expires_at,
+            now=now,
+            confirmation_now=confirmation_now,
         )
+
     except Exception as exc:
         LOGGER.exception(
-            "trade workflow start failed",
+            "trade submission coordination failed",
             extra={
                 "correlation_id": correlation_id,
                 "request_id": request_id,
@@ -348,23 +356,18 @@ def handle_trade_submission(
         )
 
     LOGGER.info(
-        "trade workflow started",
+        "trade submission coordinated",
         extra={
             "correlation_id": correlation_id,
             "request_id": request_id,
             "execution_name": execution_name,
-            "execution_arn": workflow_start["execution_arn"],
+            "coordination_status": coordination_result["status"],
         },
     )
-
-    return json_response(
-        status_code=202,
+    return map_trade_submission_outcome(
+        outcome=coordination_result,
+        operation_id=execution_name,
         correlation_id=correlation_id,
-        body={
-            "status": "accepted_for_processing",
-            "operation_id": execution_name,
-            "correlation_id": correlation_id,
-        },
     )
 
 
@@ -839,3 +842,148 @@ def coordinate_expired_trade_recovery(
         reconciliation_result=reconciliation_result,
     )
     return confirmation
+
+
+def coordinate_trade_submission(
+    *,
+    table: Any,
+    step_functions_client: Any,
+    state_machine_arn: str,
+    tenant_id: str,
+    idempotency_key: str,
+    trade: Mapping[str, Any],
+    recovery_token: str,
+    lease_expires_at: int,
+    now: int,
+    confirmation_now: int,
+) -> dict[str, str]:
+    """
+    Route a normalised trade through initial submission
+    or existing-submission recovery.
+
+    Return a dictionary containing at least a status.
+
+    Never start a workflow directly. Delegate to the
+    existing coordinators.
+
+    Propagate unexpected AWS and validation errors.
+    """
+
+    initial_result = coordinate_initial_trade_start(
+        table=table,
+        step_functions_client=step_functions_client,
+        state_machine_arn=state_machine_arn,
+        tenant_id=tenant_id,
+        idempotency_key=idempotency_key,
+        trade=trade,
+        recovery_token=recovery_token,
+        lease_expires_at=lease_expires_at,
+        registration_now=now,
+        confirmation_now=confirmation_now,
+    )
+    status = initial_result["status"]
+    if status == "START_CONFIRMED":
+        return initial_result
+    if status == "CONFLICT":
+        return initial_result
+    if status == "MATCH":
+        recovery_status = coordinate_expired_trade_recovery(
+            table=table,
+            step_functions_client=step_functions_client,
+            state_machine_arn=state_machine_arn,
+            tenant_id=tenant_id,
+            idempotency_key=idempotency_key,
+            trade=trade,
+            new_recovery_token=recovery_token,
+            new_lease_expires_at=lease_expires_at,
+            claim_now=now,
+            confirmation_now=confirmation_now,
+        )
+        return {"status": recovery_status}
+
+    raise ValueError(f"Unexpected initial trade coordination status: {status!r}.")
+
+
+def map_trade_submission_outcome(
+    *,
+    outcome: Mapping[str, str],
+    operation_id: str,
+    correlation_id: str,
+) -> dict[str, Any]:
+    """
+    Convert an internal trade coordination outcome
+    into an API Gateway-compatible HTTP response.
+
+    Preserve the operation ID and correlation ID.
+
+    Do not perform DynamoDB or Step Functions operations.
+
+    Raise ValueError for an unknown coordination status.
+    """
+
+    outcome_status = outcome["status"]
+    match outcome_status:
+        case "START_CONFIRMED":
+            return json_response(
+                status_code=202,
+                correlation_id=correlation_id,
+                body={
+                    "status": "accepted_for_processing",
+                    "operation_id": operation_id,
+                    "correlation_id": correlation_id,
+                },
+            )
+        case "ALREADY_CONFIRMED":
+            return json_response(
+                status_code=200,
+                correlation_id=correlation_id,
+                body={
+                    "status": "already_accepted",
+                    "operation_id": operation_id,
+                    "correlation_id": correlation_id,
+                },
+            )
+        case "CONFLICT":
+            return json_response(
+                status_code=409,
+                correlation_id=correlation_id,
+                body={
+                    "error": "idempotency_key_conflict",
+                    "operation_id": operation_id,
+                    "correlation_id": correlation_id,
+                },
+            )
+        case "NOT_CLAIMED":
+            return json_response(
+                status_code=202,
+                correlation_id=correlation_id,
+                body={
+                    "status": "confirmation_pending",
+                    "operation_id": operation_id,
+                    "correlation_id": correlation_id,
+                },
+            )
+        case "INCONCLUSIVE":
+            return json_response(
+                status_code=503,
+                correlation_id=correlation_id,
+                body={
+                    "error": "start_status_unknown",
+                    "operation_id": operation_id,
+                    "correlation_id": correlation_id,
+                },
+            )
+        case "INPUT_MISMATCH":
+            return json_response(
+                status_code=500,
+                correlation_id=correlation_id,
+                body={
+                    "error": "submission_verification_failed",
+                    "operation_id": operation_id,
+                    "correlation_id": correlation_id,
+                },
+            )
+        case _:
+            raise ValueError(
+                f"Unexpected trade submission outcome: {outcome_status!r}."
+            )
