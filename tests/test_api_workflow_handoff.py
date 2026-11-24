@@ -21,6 +21,7 @@ from api_workflow_handoff import (
     describe_trade_execution,
     execution_input_matches,
     extract_authenticated_tenant_id,
+    get_submission_table,
     handle_trade_submission,
     inspect_trade_execution_for_recovery,
     lambda_handler,
@@ -73,7 +74,7 @@ def test_valid_request_starts_workflow_with_normalised_input(submission_table) -
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response["statusCode"] == 202
@@ -110,7 +111,7 @@ def test_valid_request_returns_truthful_accepted_response(submission_table) -> N
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     body = json.loads(response["body"])
@@ -132,7 +133,7 @@ def test_invalid_json_returns_400_without_starting_workflow(submission_table) ->
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response["statusCode"] == 400
@@ -154,7 +155,7 @@ def test_non_object_json_returns_400_without_starting_workflow(
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response["statusCode"] == 400
@@ -186,7 +187,7 @@ def test_base64_encoded_json_body_is_decoded_before_workflow_start(
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response["statusCode"] == 202
@@ -207,7 +208,7 @@ def test_missing_trade_field_returns_400_without_starting_workflow(
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response["statusCode"] == 400
@@ -237,7 +238,7 @@ def test_external_fields_are_not_passed_to_workflow(submission_table) -> None:
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response["statusCode"] == 202
@@ -258,7 +259,7 @@ def test_missing_idempotency_key_returns_400(submission_table) -> None:
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response["statusCode"] == 400
@@ -287,7 +288,7 @@ def test_retryable_step_functions_failure_returns_503_not_202(submission_table) 
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     body = json.loads(response["body"])
@@ -318,7 +319,7 @@ def test_duplicate_execution_name_returns_client_safe_409(submission_table) -> N
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response["statusCode"] == 409
@@ -349,7 +350,7 @@ def test_permission_failure_returns_500_without_leaking_aws_details(
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response["statusCode"] == 500
@@ -374,7 +375,7 @@ def test_connection_failure_returns_503_without_leaking_endpoint(
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response["statusCode"] == 503
@@ -397,7 +398,7 @@ def test_unexpected_start_failure_returns_500_without_leaking_details(
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response["statusCode"] == 500
@@ -419,7 +420,7 @@ def test_missing_state_machine_configuration_returns_500_without_sdk_call(
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response["statusCode"] == 500
@@ -548,7 +549,7 @@ def test_retry_with_same_idempotency_key_has_stable_workflow_input(
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     retry_response = handle_trade_submission(
@@ -565,7 +566,7 @@ def test_retry_with_same_idempotency_key_has_stable_workflow_input(
         recovery_token="token-B",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert client.start_execution.call_count == 1
@@ -622,7 +623,7 @@ def test_changed_volume_same_key_returns_idempotency_conflict(submission_table) 
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     request_body_b = json.dumps(
@@ -647,7 +648,7 @@ def test_changed_volume_same_key_returns_idempotency_conflict(submission_table) 
         recovery_token="token-B",
         lease_expires_at=150,
         now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert client.start_execution.call_count == 1
@@ -1553,7 +1554,7 @@ def test_coordinate_initial_trade_start_confirms_success(
         recovery_token=expected_record["recovery_token"],
         lease_expires_at=expected_record["lease_expires_at"],
         registration_now=100,
-        confirmation_now=150,
+        confirmation_clock=lambda: 150,
     )
 
     stored_record = submission_table.get_item(
@@ -1632,7 +1633,7 @@ def test_coordinate_initial_trade_start_confirmed_matching_duplicate_skips_workf
         recovery_token=expected_record["recovery_token"],
         lease_expires_at=expected_record["lease_expires_at"],
         registration_now=100,
-        confirmation_now=150,
+        confirmation_clock=lambda: 150,
     )
 
     stored_record = submission_table.get_item(
@@ -1652,7 +1653,7 @@ def test_coordinate_initial_trade_start_confirmed_matching_duplicate_skips_workf
         "recovery_token": "TOKEN-B",
         "lease_expires_at": 300,
         "registration_now": 160,
-        "confirmation_now": 170,
+        "confirmation_clock": lambda: 170,
     }
     duplicate_response = coordinate_initial_trade_start(
         table=submission_table,
@@ -1663,7 +1664,7 @@ def test_coordinate_initial_trade_start_confirmed_matching_duplicate_skips_workf
         recovery_token=duplicate_record["recovery_token"],
         lease_expires_at=duplicate_record["lease_expires_at"],
         registration_now=duplicate_record["registration_now"],
-        confirmation_now=duplicate_record["confirmation_now"],
+        confirmation_clock=lambda: duplicate_record["confirmation_clock"],
     )
     post_duplicate_record = submission_table.get_item(
         Key={
@@ -1730,7 +1731,7 @@ def test_coordinate_initial_trade_start_conflicting_payload_skips_workflow(
         recovery_token=expected_record["recovery_token"],
         lease_expires_at=expected_record["lease_expires_at"],
         registration_now=100,
-        confirmation_now=150,
+        confirmation_clock=lambda: 150,
     )
 
     stored_record = submission_table.get_item(
@@ -1757,7 +1758,7 @@ def test_coordinate_initial_trade_start_conflicting_payload_skips_workflow(
         "recovery_token": "TOKEN-B",
         "lease_expires_at": 300,
         "registration_now": 160,
-        "confirmation_now": 170,
+        "confirmation_clock": lambda: 170,
     }
     conflict_response = coordinate_initial_trade_start(
         table=submission_table,
@@ -1768,7 +1769,7 @@ def test_coordinate_initial_trade_start_conflicting_payload_skips_workflow(
         recovery_token=conflicting_attempt["recovery_token"],
         lease_expires_at=conflicting_attempt["lease_expires_at"],
         registration_now=conflicting_attempt["registration_now"],
-        confirmation_now=conflicting_attempt["confirmation_now"],
+        confirmation_clock=lambda: conflicting_attempt["confirmation_clock"],
     )
     post_conflicting_attempt = submission_table.get_item(
         Key={
@@ -1830,7 +1831,7 @@ def test_coordinate_initial_trade_start_start_error_leaves_unconfirmed(
             recovery_token=expected_record["recovery_token"],
             lease_expires_at=expected_record["lease_expires_at"],
             registration_now=100,
-            confirmation_now=150,
+            confirmation_clock=lambda: 150,
         )
 
     assert exc_info.value.response["Error"]["Code"] == "ThrottlingException"
@@ -1904,7 +1905,7 @@ def test_coordinate_initial_trade_start_confirmation_failure(
                 recovery_token="TOKEN-A",
                 lease_expires_at=200,
                 registration_now=100,
-                confirmation_now=150,
+                confirmation_clock=lambda: 150,
             )
 
     assert exc_info.value is error
@@ -2743,7 +2744,7 @@ def test_coordinate_expired_trade_recovery_success(submission_table) -> None:
         new_recovery_token="token-B",
         new_lease_expires_at=150,
         claim_now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response == "START_CONFIRMED"
@@ -2800,7 +2801,7 @@ def test_coordinate_expired_trade_recovery_already_confirmed(submission_table) -
         new_recovery_token="token-B",
         new_lease_expires_at=150,
         claim_now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response == "ALREADY_CONFIRMED"
@@ -2856,7 +2857,7 @@ def test_coordinate_expired_trade_recovery_payload_fingerprint_conflict(
         new_recovery_token="token-B",
         new_lease_expires_at=150,
         claim_now=100,
-        confirmation_now=110,
+        confirmation_clock=lambda: 110,
     )
 
     assert response == "CONFLICT"
@@ -2912,7 +2913,7 @@ def test_coordinate_expired_trade_recovery_not_claimed(submission_table) -> None
             new_recovery_token="token-B",
             new_lease_expires_at=150,
             claim_now=100,
-            confirmation_now=110,
+            confirmation_clock=lambda: 110,
         )
 
     update_item.assert_called_once()
@@ -2970,7 +2971,7 @@ def test_coordinate_expired_trade_recovery_inconclusive(submission_table) -> Non
             new_recovery_token="token-B",
             new_lease_expires_at=150,
             claim_now=100,
-            confirmation_now=110,
+            confirmation_clock=lambda: 110,
         )
 
     assert response == "INCONCLUSIVE"
@@ -3040,7 +3041,7 @@ def test_coordinate_expired_trade_recovery_execution_mismatch(submission_table) 
             new_recovery_token="token-B",
             new_lease_expires_at=150,
             claim_now=100,
-            confirmation_now=110,
+            confirmation_clock=lambda: 110,
         )
 
     assert response == "INPUT_MISMATCH"
@@ -3103,7 +3104,7 @@ def test_coordinate_expired_trade_recovery_confirmed_payload_conflict(
             new_recovery_token="token-B",
             new_lease_expires_at=150,
             claim_now=100,
-            confirmation_now=110,
+            confirmation_clock=lambda: 110,
         )
     assert response == "CONFLICT"
     update_item.assert_not_called()
@@ -3150,7 +3151,7 @@ def test_coordinate_trade_submission_returned_starts_new_trade(
             trade=trade,
             recovery_token="token-A",
             lease_expires_at=150,
-            confirmation_now=120,
+            confirmation_clock=lambda: 120,
             now=80,
         )
 
@@ -3209,7 +3210,7 @@ def test_coordinate_trade_submission_already_confirmed(
             trade=trade,
             recovery_token="token-A",
             lease_expires_at=150,
-            confirmation_now=120,
+            confirmation_clock=lambda: 120,
             now=100,
         )
 
@@ -3272,7 +3273,7 @@ def test_coordinate_trade_submission_returned_recover_claim(
             trade=trade,
             recovery_token="token-B",
             lease_expires_at=150,
-            confirmation_now=120,
+            confirmation_clock=lambda: 120,
             now=100,
         )
 
@@ -3342,7 +3343,7 @@ def test_coordinate_trade_submission_execution_not_observed(
             trade=trade,
             recovery_token="token-B",
             lease_expires_at=150,
-            confirmation_now=120,
+            confirmation_clock=lambda: 120,
             now=100,
         )
 
@@ -3502,6 +3503,7 @@ def test_map_trade_submission_outcome_unknown_status(status: str) -> None:
 
 
 def test_coordinate_trade_submission_routes_match_to_recovery(submission_table) -> None:
+    clock = Mock(return_value=110)
 
     common = {
         "table": submission_table,
@@ -3533,7 +3535,7 @@ def test_coordinate_trade_submission_routes_match_to_recovery(submission_table) 
             recovery_token="token-B",
             lease_expires_at=130,
             now=100,
-            confirmation_now=110,
+            confirmation_clock=clock,
         )
 
     initial_start.assert_called_once()
@@ -3542,7 +3544,7 @@ def test_coordinate_trade_submission_routes_match_to_recovery(submission_table) 
         new_recovery_token="token-B",
         new_lease_expires_at=130,
         claim_now=100,
-        confirmation_now=110,
+        confirmation_clock=clock,
     )
     assert response == {"status": "START_CONFIRMED"}
 
@@ -3586,7 +3588,7 @@ def test_handle_trade_submission_maps_coordinator_outcome(
         "recovery_token": "token-A",
         "lease_expires_at": 150,
         "now": 100,
-        "confirmation_now": 110,
+        "confirmation_clock": lambda: 110,
     }
 
     with patch(
@@ -3609,3 +3611,109 @@ def test_handle_trade_submission_maps_coordinator_outcome(
     headers = response["headers"]
     assert headers["content-type"] == "application/json"
     assert headers["x-correlation-id"] == "CORR-123"
+
+
+def test_get_submission_table_reuses_cached_resource() -> None:
+    table_name = "trade-submissions"
+    fake_dynamodb = Mock()
+    fake_table = Mock()
+    fake_dynamodb.Table.return_value = fake_table
+
+    get_submission_table.cache_clear()
+    try:
+        with patch(
+            "api_workflow_handoff.boto3.resource",
+            return_value=fake_dynamodb,
+            autospec=True,
+        ) as mock_resource:
+            first_table = get_submission_table(table_name)
+            second_table = get_submission_table(table_name)
+
+            fake_dynamodb.Table.assert_called_once_with(table_name)
+            mock_resource.assert_called_once_with("dynamodb")
+            assert first_table is fake_table
+            assert second_table is first_table
+    finally:
+        get_submission_table.cache_clear()
+
+
+def test_initial_trade_start_rejects_confirmation_after_lease_expiry(
+    submission_table,
+) -> None:
+    client = Mock()
+    clock = Mock(return_value=110)
+
+    execution_name = build_execution_name(
+        "TENANT-A",
+        "SUBMISSION-1001",
+    )
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+
+    def simulated_workflow_start(**kwargs):
+        clock.assert_not_called()
+        clock.return_value = 165
+
+        return {
+            "executionArn": expected_execution_arn,
+            "startDate": "2026-01-01T00:00:00Z",
+        }
+
+    client.start_execution.side_effect = simulated_workflow_start
+
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = normalise_trade(
+        {
+            "trade_id": "TRD-1001",
+            "product": "POWER",
+            "volume_mwh": 25,
+        }
+    )
+
+    with pytest.raises(
+        ClientError,
+        match="ConditionalCheckFailedException",
+    ) as exc_info:
+        coordinate_initial_trade_start(
+            table=submission_table,
+            step_functions_client=client,
+            state_machine_arn=STATE_MACHINE_ARN,
+            **key,
+            trade=trade,
+            recovery_token="token-A",
+            lease_expires_at=150,
+            registration_now=100,
+            confirmation_clock=clock,
+        )
+
+    assert exc_info.value.response["Error"]["Code"] == "ConditionalCheckFailedException"
+
+    stored_record = submission_table.get_item(
+        Key=key,
+        ConsistentRead=True,
+    )["Item"]
+
+    assert stored_record == {
+        **key,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+        "status": "STARTING",
+        "recovery_token": "token-A",
+        "lease_expires_at": 150,
+    }
+
+    client.start_execution.assert_called_once()
+    clock.assert_called_once_with()
+    start_args = client.start_execution.call_args.kwargs
+
+    assert start_args["stateMachineArn"] == STATE_MACHINE_ARN
+    assert start_args["name"] == build_execution_name("TENANT-A", "SUBMISSION-1001")
+    assert json.loads(start_args["input"]) == {
+        "trade": trade,
+        "idempotency_key": "SUBMISSION-1001",
+    }

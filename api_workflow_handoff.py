@@ -14,7 +14,12 @@ import json
 import logging
 import os
 import re
-from collections.abc import Mapping
+import time
+from collections.abc import (
+    Callable,
+    Mapping,
+)
+from functools import lru_cache
 from typing import Any
 
 import boto3
@@ -276,7 +281,7 @@ def handle_trade_submission(
     recovery_token: str,
     lease_expires_at: int,
     now: int,
-    confirmation_now: int,
+    confirmation_clock: Callable[[], int],
 ) -> dict[str, Any]:
     """Translate an HTTP request into an asynchronous workflow start."""
     request_id = extract_request_id(event, context)
@@ -333,7 +338,7 @@ def handle_trade_submission(
             recovery_token=recovery_token,
             lease_expires_at=lease_expires_at,
             now=now,
-            confirmation_now=confirmation_now,
+            confirmation_clock=confirmation_clock,
         )
 
     except Exception as exc:
@@ -497,7 +502,7 @@ def coordinate_initial_trade_start(
     recovery_token: str,
     lease_expires_at: int,
     registration_now: int,
-    confirmation_now: int,
+    confirmation_clock: Callable[[], int],
 ) -> dict[str, str]:
     """Coordinate registration, workflow start and confirmation."""
 
@@ -538,7 +543,7 @@ def coordinate_initial_trade_start(
             idempotency_key=idempotency_key,
             execution_arn=execution_arn,
             recovery_token=recovery_token,
-            now=confirmation_now,
+            now=confirmation_clock(),
         )
         return {
             "status": status,
@@ -783,7 +788,7 @@ def coordinate_expired_trade_recovery(
     new_recovery_token: str,
     new_lease_expires_at: int,
     claim_now: int,
-    confirmation_now: int,
+    confirmation_clock: Callable[[], int],
 ) -> str:
     """
     Coordinate recovery of an existing trade submission.
@@ -838,7 +843,7 @@ def coordinate_expired_trade_recovery(
         tenant_id=tenant_id,
         idempotency_key=idempotency_key,
         recovery_token=new_recovery_token,
-        now=confirmation_now,
+        now=confirmation_clock(),
         reconciliation_result=reconciliation_result,
     )
     return confirmation
@@ -855,7 +860,7 @@ def coordinate_trade_submission(
     recovery_token: str,
     lease_expires_at: int,
     now: int,
-    confirmation_now: int,
+    confirmation_clock: Callable[[], int],
 ) -> dict[str, str]:
     """
     Route a normalised trade through initial submission
@@ -879,7 +884,7 @@ def coordinate_trade_submission(
         recovery_token=recovery_token,
         lease_expires_at=lease_expires_at,
         registration_now=now,
-        confirmation_now=confirmation_now,
+        confirmation_clock=confirmation_clock,
     )
     status = initial_result["status"]
     if status == "START_CONFIRMED":
@@ -897,7 +902,7 @@ def coordinate_trade_submission(
             new_recovery_token=recovery_token,
             new_lease_expires_at=lease_expires_at,
             claim_now=now,
-            confirmation_now=confirmation_now,
+            confirmation_clock=confirmation_clock,
         )
         return {"status": recovery_status}
 
@@ -987,3 +992,20 @@ def map_trade_submission_outcome(
             raise ValueError(
                 f"Unexpected trade submission outcome: {outcome_status!r}."
             )
+
+
+@lru_cache(maxsize=1)
+def get_submission_table(table_name: str) -> Any:
+    """
+    Lazily obtain a DynamoDB table resource and reuse it
+    across warm Lambda invocations.
+    """
+    dynamodb = boto3.resource("dynamodb")
+    table = dynamodb.Table(table_name)
+
+    return table
+
+
+def current_epoch_seconds() -> int:
+    """Return the current Unix timestamp in whole seconds."""
+    return int(time.time())
