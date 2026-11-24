@@ -15,6 +15,7 @@ import logging
 import os
 import re
 import time
+import uuid
 from collections.abc import (
     Callable,
     Mapping,
@@ -1009,3 +1010,30 @@ def get_submission_table(table_name: str) -> Any:
 def current_epoch_seconds() -> int:
     """Return the current Unix timestamp in whole seconds."""
     return int(time.time())
+
+
+def build_submission_attempt(
+    *,
+    lease_duration_seconds: int,
+    clock: Callable[[], int],
+) -> dict[str, str | int]:
+    """
+    Generate a fresh recovery token and initial lease timestamps
+    for an individual submission attempt.
+    """
+    if isinstance(lease_duration_seconds, bool) or not isinstance(
+        lease_duration_seconds, int
+    ):
+        raise ValueError("Lease duration must be an integer")
+
+    if lease_duration_seconds <= 0:
+        raise ValueError("Lease duration must be greater than 0")
+
+    now = clock()
+    recovery_token = str(uuid.uuid4())
+
+    return {
+        "recovery_token": recovery_token,
+        "now": now,
+        "lease_expires_at": now + lease_duration_seconds,
+    }

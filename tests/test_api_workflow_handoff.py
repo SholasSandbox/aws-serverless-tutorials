@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import uuid
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
@@ -12,6 +13,7 @@ from botocore.exceptions import ClientError, EndpointConnectionError
 import api_workflow_handoff
 from api_workflow_handoff import (
     build_execution_name,
+    build_submission_attempt,
     build_workflow_input,
     confirm_verified_trade_recovery,
     coordinate_expired_trade_recovery,
@@ -3717,3 +3719,69 @@ def test_initial_trade_start_rejects_confirmation_after_lease_expiry(
         "trade": trade,
         "idempotency_key": "SUBMISSION-1001",
     }
+
+
+def test_build_submission_attempt_generates_fresh_tokens_and_lease() -> None:
+    clock = Mock(side_effect=[100, 120])
+
+    first_uuid = uuid.UUID("550e8400-e29b-41d4-a716-446655440000")
+
+    second_uuid = uuid.UUID("550e8400-e29b-41d4-a716-446655440001")
+    with patch(
+        "api_workflow_handoff.uuid.uuid4",
+        side_effect=[first_uuid, second_uuid],
+        autospec=True,
+    ) as mock_uuid:
+        first_attempt = build_submission_attempt(
+            lease_duration_seconds=50,
+            clock=clock,
+        )
+
+        second_attempt = build_submission_attempt(
+            lease_duration_seconds=50,
+            clock=clock,
+        )
+
+        assert mock_uuid.call_count == 2
+        assert clock.call_count == 2
+
+        assert first_attempt == {
+            "recovery_token": str(first_uuid),
+            "now": 100,
+            "lease_expires_at": 150,
+        }
+
+        assert second_attempt == {
+            "recovery_token": str(second_uuid),
+            "now": 120,
+            "lease_expires_at": 170,
+        }
+
+
+@pytest.mark.parametrize(
+    ("lease_duration_seconds", "expected_message"),
+    [
+        (0, "Lease duration must be greater than 0"),
+        (-1, "Lease duration must be greater than 0"),
+        (True, "Lease duration must be an integer"),
+        (1.5, "Lease duration must be an integer"),
+    ],
+)
+def test_build_submission_attempt_rejects_invalid_lease_duration(
+    lease_duration_seconds,
+    expected_message: str,
+) -> None:
+    clock = Mock(return_value=100)
+
+    with patch(
+        "api_workflow_handoff.uuid.uuid4",
+        autospec=True,
+    ) as mock_uuid:
+        with pytest.raises(ValueError, match=rf"^{re.escape(expected_message)}$"):
+            build_submission_attempt(
+                lease_duration_seconds=lease_duration_seconds,
+                clock=clock,
+            )
+
+    assert mock_uuid.call_count == 0
+    clock.assert_not_called()
