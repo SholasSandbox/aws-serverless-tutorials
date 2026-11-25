@@ -391,21 +391,10 @@ def get_step_functions_client() -> Any:
 
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """AWS Lambda entry point."""
-    state_machine_arn = os.environ.get("TRADE_STATE_MACHINE_ARN", "")
-    submission_table = os.environ.get("TRADE_SUBMISSION_TABLE_NAME", "")
-
-    try:
-        trade_submission_lease_seconds = int(
-            os.environ.get("TRADE_SUBMISSION_LEASE_SECONDS", "")
-        )
-    except ValueError:
-        raise ValueError("TRADE_SUBMISSION_LEASE_SECONDS must be an integer")
-
+    request_id = extract_request_id(event, context)
     try:
         tenant_id = extract_authenticated_tenant_id(event)
     except ValueError:
-        request_id = extract_request_id(event, context)
-
         return json_response(
             status_code=403,
             correlation_id=request_id,
@@ -414,26 +403,58 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "correlation_id": request_id,
             },
         )
-    table = get_submission_table(submission_table)
-    attempt = build_submission_attempt(
-        lease_duration_seconds=trade_submission_lease_seconds,
-        clock=current_epoch_seconds,
-    )
 
-    return handle_trade_submission(
-        event,
-        context,
-        step_functions_client=(
-            get_step_functions_client() if state_machine_arn else None
-        ),
-        state_machine_arn=state_machine_arn,
-        tenant_id=tenant_id,
-        table=table,
-        recovery_token=str(attempt["recovery_token"]),
-        lease_expires_at=int(attempt["lease_expires_at"]),
-        now=int(attempt["now"]),
-        confirmation_clock=current_epoch_seconds,
-    )
+    try:
+        state_machine_arn = os.environ.get("TRADE_STATE_MACHINE_ARN", "")
+        _parse_unqualified_state_machine_arn(state_machine_arn)
+
+        table_name = os.environ.get("TRADE_SUBMISSION_TABLE_NAME", "")
+        if not table_name.strip():
+            raise ValueError("TRADE_SUBMISSION_TABLE_NAME must be non-blank.")
+
+        try:
+            lease_duration_seconds = int(
+                os.environ.get("TRADE_SUBMISSION_LEASE_SECONDS", "")
+            )
+        except ValueError:
+            raise ValueError(
+                "TRADE_SUBMISSION_LEASE_SECONDS must be a positive integer."
+            ) from None
+        if lease_duration_seconds <= 0:
+            raise ValueError(
+                "TRADE_SUBMISSION_LEASE_SECONDS must be a positive integer."
+            )
+
+        table = get_submission_table(table_name)
+        attempt = build_submission_attempt(
+            lease_duration_seconds=lease_duration_seconds,
+            clock=current_epoch_seconds,
+        )
+        return handle_trade_submission(
+            event,
+            context,
+            step_functions_client=get_step_functions_client(),
+            state_machine_arn=state_machine_arn,
+            tenant_id=tenant_id,
+            table=table,
+            recovery_token=str(attempt["recovery_token"]),
+            lease_expires_at=int(attempt["lease_expires_at"]),
+            now=int(attempt["now"]),
+            confirmation_clock=current_epoch_seconds,
+        )
+    except ValueError:
+        LOGGER.exception(
+            "trade submission failed",
+            extra={"request_id": request_id, "correlation_id": request_id},
+        )
+        return json_response(
+            status_code=500,
+            correlation_id=request_id,
+            body={
+                "error": "Workflow could not be started.",
+                "correlation_id": request_id,
+            },
+        )
 
 
 def register_and_claim_initial_submission(
@@ -633,6 +654,17 @@ STATE_MACHINE_ARN_PATTERN = re.compile(
 )
 
 
+def _parse_unqualified_state_machine_arn(state_machine_arn: str) -> re.Match[str]:
+    arn_error = "Expected an unqualified Step Functions state machine ARN."
+    if not isinstance(state_machine_arn, str):
+        raise ValueError(arn_error)
+
+    match = STATE_MACHINE_ARN_PATTERN.fullmatch(state_machine_arn)
+    if match is None or match.group("qualifier") is not None:
+        raise ValueError(arn_error)
+    return match
+
+
 def derive_execution_arn(
     *,
     state_machine_arn: str,
@@ -650,13 +682,7 @@ def derive_execution_arn(
     Returns:
         The corresponding execution ARN.
     """
-    arn_error = "Expected an unqualified Step Functions state machine ARN."
-    if not isinstance(state_machine_arn, str):
-        raise ValueError(arn_error)
-
-    match = STATE_MACHINE_ARN_PATTERN.fullmatch(state_machine_arn)
-    if match is None or match.group("qualifier") is not None:
-        raise ValueError(arn_error)
+    match = _parse_unqualified_state_machine_arn(state_machine_arn)
 
     if not isinstance(execution_name, str) or not re.fullmatch(
         r"[A-Za-z0-9_-]{1,80}", execution_name

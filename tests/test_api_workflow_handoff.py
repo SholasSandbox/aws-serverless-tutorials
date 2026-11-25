@@ -1565,12 +1565,13 @@ def test_lambda_handler_rejects_untrusted_tenant_identity(
 
     monkeypatch.setenv("TRADE_SUBMISSION_TABLE_NAME", "trade-submissions")
 
-    monkeypatch.setenv("TRADE_SUBMISSION_LEASE_SECONDS", "50")
+    monkeypatch.delenv("TRADE_SUBMISSION_LEASE_SECONDS", raising=False)
 
     mock_get_client = Mock()
     mock_handler = Mock()
     mock_get_table = Mock()
     mock_build_attempt = Mock()
+    mock_clock = Mock(return_value=110)
 
     monkeypatch.setattr(
         api_workflow_handoff,
@@ -1595,8 +1596,6 @@ def test_lambda_handler_rejects_untrusted_tenant_identity(
         mock_build_attempt,
     )
 
-    mock_clock = Mock(return_value=110)
-
     monkeypatch.setattr(
         api_workflow_handoff,
         "current_epoch_seconds",
@@ -1620,6 +1619,187 @@ def test_lambda_handler_rejects_untrusted_tenant_identity(
     mock_build_attempt.assert_not_called()
     mock_clock.assert_not_called()
     mock_handler.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("environment_variable", "invalid_value"),
+    [
+        pytest.param(
+            "TRADE_STATE_MACHINE_ARN",
+            None,
+            id="missing-state-machine-arn",
+        ),
+        pytest.param(
+            "TRADE_SUBMISSION_TABLE_NAME",
+            None,
+            id="missing-table-name",
+        ),
+        pytest.param(
+            "TRADE_SUBMISSION_LEASE_SECONDS",
+            None,
+            id="missing-lease-duration",
+        ),
+        pytest.param(
+            "TRADE_STATE_MACHINE_ARN",
+            "",
+            id="empty-state-machine-arn",
+        ),
+        pytest.param(
+            "TRADE_SUBMISSION_TABLE_NAME",
+            "",
+            id="empty-table-name",
+        ),
+        pytest.param(
+            "TRADE_SUBMISSION_LEASE_SECONDS",
+            "",
+            id="empty-lease-duration",
+        ),
+        pytest.param(
+            "TRADE_STATE_MACHINE_ARN",
+            "   ",
+            id="whitespace-state-machine-arn",
+        ),
+        pytest.param(
+            "TRADE_SUBMISSION_TABLE_NAME",
+            "   ",
+            id="whitespace-table-name",
+        ),
+        pytest.param(
+            "TRADE_SUBMISSION_LEASE_SECONDS",
+            "   ",
+            id="whitespace-lease-duration",
+        ),
+        pytest.param(
+            "TRADE_SUBMISSION_LEASE_SECONDS",
+            "abc",
+            id="non-numeric-lease-duration",
+        ),
+        pytest.param(
+            "TRADE_SUBMISSION_LEASE_SECONDS",
+            "1.5",
+            id="fractional-lease-duration",
+        ),
+        pytest.param(
+            "TRADE_SUBMISSION_LEASE_SECONDS",
+            "0",
+            id="zero-lease-duration",
+        ),
+        pytest.param(
+            "TRADE_SUBMISSION_LEASE_SECONDS",
+            "-1",
+            id="negative-lease-duration",
+        ),
+        pytest.param(
+            "TRADE_STATE_MACHINE_ARN",
+            "arn:aws:states::123456789012:stateMachine:trade-processing",
+            id="malformed-state-machine-arn",
+        ),
+        pytest.param(
+            "TRADE_STATE_MACHINE_ARN",
+            f"{STATE_MACHINE_ARN}:8",
+            id="version-state-machine-arn",
+        ),
+        pytest.param(
+            "TRADE_STATE_MACHINE_ARN",
+            f"{STATE_MACHINE_ARN}:PROD",
+            id="alias-state-machine-arn",
+        ),
+    ],
+)
+def test_lambda_handler_rejects_invalid_runtime_configuration(
+    monkeypatch: pytest.MonkeyPatch,
+    environment_variable: str,
+    invalid_value: str | None,
+) -> None:
+    event = make_event(request_id="REQ-123")
+    event["requestContext"]["authorizer"] = {
+        "jwt": {"claims": {"tenant_id": "TENANT-A"}},
+    }
+    monkeypatch.setenv(
+        "TRADE_STATE_MACHINE_ARN",
+        STATE_MACHINE_ARN,
+    )
+
+    monkeypatch.setenv(
+        "TRADE_SUBMISSION_TABLE_NAME",
+        "trade-submissions",
+    )
+
+    monkeypatch.setenv(
+        "TRADE_SUBMISSION_LEASE_SECONDS",
+        "50",
+    )
+
+    if invalid_value is None:
+        monkeypatch.delenv(
+            environment_variable,
+            raising=False,
+        )
+    else:
+        monkeypatch.setenv(
+            environment_variable,
+            invalid_value,
+        )
+
+    mock_get_client = Mock()
+    mock_get_table = Mock()
+    mock_build_attempt = Mock()
+    mock_clock = Mock()
+    mock_handler = Mock()
+
+    with patch.multiple(
+        api_workflow_handoff,
+        get_step_functions_client=mock_get_client,
+        get_submission_table=mock_get_table,
+        build_submission_attempt=mock_build_attempt,
+        current_epoch_seconds=mock_clock,
+        handle_trade_submission=mock_handler,
+    ):
+        response = lambda_handler(
+            event,
+            SimpleNamespace(aws_request_id="LAMBDA-789"),
+        )
+
+    assert response["statusCode"] == 500
+    assert json.loads(response["body"]) == {
+        "error": "Workflow could not be started.",
+        "correlation_id": "REQ-123",
+    }
+    assert response["headers"]["x-correlation-id"] == "REQ-123"
+
+    mock_get_client.assert_not_called()
+    mock_get_table.assert_not_called()
+    mock_build_attempt.assert_not_called()
+    mock_clock.assert_not_called()
+    mock_handler.assert_not_called()
+
+
+def test_lambda_handler_returns_500_for_internal_value_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    event = make_event(request_id="REQ-123")
+    event["requestContext"]["authorizer"] = {
+        "jwt": {"claims": {"tenant_id": "TENANT-A"}},
+    }
+    monkeypatch.setenv("TRADE_STATE_MACHINE_ARN", STATE_MACHINE_ARN)
+    monkeypatch.setenv("TRADE_SUBMISSION_TABLE_NAME", "trade-submissions")
+    monkeypatch.setenv("TRADE_SUBMISSION_LEASE_SECONDS", "50")
+    mock_handler = Mock(side_effect=ValueError("Internal submission detail"))
+
+    with patch.multiple(
+        api_workflow_handoff,
+        get_step_functions_client=Mock(),
+        get_submission_table=Mock(),
+        handle_trade_submission=mock_handler,
+    ):
+        response = lambda_handler(event, None)
+
+    mock_handler.assert_called_once()
+    assert response["statusCode"] == 500
+    assert json.loads(response["body"]) == {
+        "error": "Workflow could not be started.",
+        "correlation_id": "REQ-123",
+    }
 
 
 def test_coordinate_initial_trade_start_confirms_success(
