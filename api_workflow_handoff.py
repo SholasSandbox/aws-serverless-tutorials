@@ -392,6 +392,14 @@ def get_step_functions_client() -> Any:
 def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """AWS Lambda entry point."""
     state_machine_arn = os.environ.get("TRADE_STATE_MACHINE_ARN", "")
+    submission_table = os.environ.get("TRADE_SUBMISSION_TABLE_NAME", "")
+
+    try:
+        trade_submission_lease_seconds = int(
+            os.environ.get("TRADE_SUBMISSION_LEASE_SECONDS", "")
+        )
+    except ValueError:
+        raise ValueError("TRADE_SUBMISSION_LEASE_SECONDS must be an integer")
 
     try:
         tenant_id = extract_authenticated_tenant_id(event)
@@ -406,6 +414,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "correlation_id": request_id,
             },
         )
+    table = get_submission_table(submission_table)
+    attempt = build_submission_attempt(
+        lease_duration_seconds=trade_submission_lease_seconds,
+        clock=current_epoch_seconds,
+    )
 
     return handle_trade_submission(
         event,
@@ -415,6 +428,11 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         ),
         state_machine_arn=state_machine_arn,
         tenant_id=tenant_id,
+        table=table,
+        recovery_token=str(attempt["recovery_token"]),
+        lease_expires_at=int(attempt["lease_expires_at"]),
+        now=int(attempt["now"]),
+        confirmation_clock=current_epoch_seconds,
     )
 
 

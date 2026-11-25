@@ -5,7 +5,7 @@ import json
 import re
 import uuid
 from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, create_autospec, patch
 
 import pytest
 from botocore.exceptions import ClientError, EndpointConnectionError
@@ -1332,7 +1332,7 @@ def test_extract_authenticated_tenant_id_rejects_malformed_event_structure() -> 
         extract_authenticated_tenant_id(event=event)
 
 
-def test_lambda_handler_forwards_authenticated_tenant(
+def test_lambda_handler_forwards_runtime_dependencies(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
 
@@ -1352,10 +1352,45 @@ def test_lambda_handler_forwards_authenticated_tenant(
     # Supply the environment configuration expected by lambda_handler.
     monkeypatch.setenv("TRADE_STATE_MACHINE_ARN", STATE_MACHINE_ARN)
 
+    monkeypatch.setenv("TRADE_SUBMISSION_TABLE_NAME", "trade-submissions")
+
+    monkeypatch.setenv("TRADE_SUBMISSION_LEASE_SECONDS", "50")
+
     # Create fake dependencies
     fake_client = Mock()
+    fake_table = Mock()
     mock_get_client = Mock(return_value=fake_client)
-    mock_handler = Mock(return_value={"statusCode": 202, "body": "{}"})
+
+    mock_clock = Mock(return_value=100)
+
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "current_epoch_seconds",
+        mock_clock,
+    )
+
+    expected_uuid = uuid.UUID("550e8400-e29b-41d4-a716-446655440000")
+
+    mock_uuid = Mock(return_value=expected_uuid)
+
+    monkeypatch.setattr(
+        api_workflow_handoff.uuid,
+        "uuid4",
+        mock_uuid,
+    )
+
+    mock_get_table = Mock(return_value=fake_table)
+
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "get_submission_table",
+        mock_get_table,
+    )
+
+    mock_handler = create_autospec(
+        api_workflow_handoff.handle_trade_submission,
+        return_value={"statusCode": 202, "body": "{}"},
+    )
 
     # Replace production dependencies with mocks for this test.
     monkeypatch.setattr(
@@ -1384,7 +1419,18 @@ def test_lambda_handler_forwards_authenticated_tenant(
         step_functions_client=fake_client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=fake_table,
+        recovery_token=str(expected_uuid),
+        lease_expires_at=150,
+        now=100,
+        confirmation_clock=mock_clock,
     )
+
+    mock_get_client.assert_called_once_with()
+
+    mock_get_table.assert_called_once_with("trade-submissions")
+    mock_uuid.assert_called_once_with()
+    mock_clock.assert_called_once_with()
 
 
 def test_lambda_handler_ignores_untrusted_tenant_header(
@@ -1406,10 +1452,26 @@ def test_lambda_handler_ignores_untrusted_tenant_header(
     # Supply the environment configuration expected by lambda_handler.
     monkeypatch.setenv("TRADE_STATE_MACHINE_ARN", STATE_MACHINE_ARN)
 
+    monkeypatch.setenv("TRADE_SUBMISSION_TABLE_NAME", "trade-submissions")
+
+    monkeypatch.setenv("TRADE_SUBMISSION_LEASE_SECONDS", "50")
+
     # Create fake dependencies
     fake_client = Mock()
+    fake_table = Mock()
     mock_get_client = Mock(return_value=fake_client)
-    mock_handler = Mock(return_value={"statusCode": 202, "body": "{}"})
+    mock_handler = create_autospec(
+        api_workflow_handoff.handle_trade_submission,
+        return_value={"statusCode": 202, "body": "{}"},
+    )
+
+    mock_get_table = Mock(return_value=fake_table)
+
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "get_submission_table",
+        mock_get_table,
+    )
 
     # Replace production dependencies with mocks for this test.
     monkeypatch.setattr(
@@ -1422,6 +1484,26 @@ def test_lambda_handler_ignores_untrusted_tenant_header(
         api_workflow_handoff,
         "handle_trade_submission",
         mock_handler,
+    )
+
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "build_submission_attempt",
+        Mock(
+            return_value={
+                "recovery_token": "token-A",
+                "now": 100,
+                "lease_expires_at": 150,
+            }
+        ),
+    )
+
+    mock_clock = Mock(return_value=110)
+
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "current_epoch_seconds",
+        mock_clock,
     )
 
     context = SimpleNamespace(aws_request_id="LAMBDA-789")
@@ -1441,7 +1523,13 @@ def test_lambda_handler_ignores_untrusted_tenant_header(
         step_functions_client=fake_client,
         state_machine_arn=STATE_MACHINE_ARN,
         tenant_id="TENANT-A",
+        table=fake_table,
+        recovery_token="token-A",
+        lease_expires_at=150,
+        now=100,
+        confirmation_clock=mock_clock,
     )
+    mock_clock.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -1475,8 +1563,14 @@ def test_lambda_handler_rejects_untrusted_tenant_identity(
 
     monkeypatch.setenv("TRADE_STATE_MACHINE_ARN", STATE_MACHINE_ARN)
 
+    monkeypatch.setenv("TRADE_SUBMISSION_TABLE_NAME", "trade-submissions")
+
+    monkeypatch.setenv("TRADE_SUBMISSION_LEASE_SECONDS", "50")
+
     mock_get_client = Mock()
     mock_handler = Mock()
+    mock_get_table = Mock()
+    mock_build_attempt = Mock()
 
     monkeypatch.setattr(
         api_workflow_handoff,
@@ -1487,6 +1581,26 @@ def test_lambda_handler_rejects_untrusted_tenant_identity(
         api_workflow_handoff,
         "handle_trade_submission",
         mock_handler,
+    )
+
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "get_submission_table",
+        mock_get_table,
+    )
+
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "build_submission_attempt",
+        mock_build_attempt,
+    )
+
+    mock_clock = Mock(return_value=110)
+
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "current_epoch_seconds",
+        mock_clock,
     )
 
     response = lambda_handler(
@@ -1502,6 +1616,9 @@ def test_lambda_handler_rejects_untrusted_tenant_identity(
     assert response["headers"]["x-correlation-id"] == "REQ-123"
 
     mock_get_client.assert_not_called()
+    mock_get_table.assert_not_called()
+    mock_build_attempt.assert_not_called()
+    mock_clock.assert_not_called()
     mock_handler.assert_not_called()
 
 
@@ -1626,6 +1743,8 @@ def test_coordinate_initial_trade_start_confirmed_matching_duplicate_skips_workf
         "startDate": "2026-01-01T00:00:00Z",
     }
 
+    mock_clock = Mock(return_value=170)
+
     coordinate_initial_trade_start(
         table=submission_table,
         step_functions_client=client,
@@ -1666,7 +1785,7 @@ def test_coordinate_initial_trade_start_confirmed_matching_duplicate_skips_workf
         recovery_token=duplicate_record["recovery_token"],
         lease_expires_at=duplicate_record["lease_expires_at"],
         registration_now=duplicate_record["registration_now"],
-        confirmation_clock=lambda: duplicate_record["confirmation_clock"],
+        confirmation_clock=mock_clock,
     )
     post_duplicate_record = submission_table.get_item(
         Key={
@@ -1681,6 +1800,7 @@ def test_coordinate_initial_trade_start_confirmed_matching_duplicate_skips_workf
     }
     assert post_duplicate_record == stored_record
     client.start_execution.assert_not_called()
+    mock_clock.assert_not_called()
 
 
 def test_coordinate_initial_trade_start_conflicting_payload_skips_workflow(
@@ -1723,6 +1843,8 @@ def test_coordinate_initial_trade_start_conflicting_payload_skips_workflow(
         "executionArn": expected_record["execution_arn"],
         "startDate": "2026-01-01T00:00:00Z",
     }
+
+    mock_clock = Mock(return_value=170)
 
     coordinate_initial_trade_start(
         table=submission_table,
@@ -1771,7 +1893,7 @@ def test_coordinate_initial_trade_start_conflicting_payload_skips_workflow(
         recovery_token=conflicting_attempt["recovery_token"],
         lease_expires_at=conflicting_attempt["lease_expires_at"],
         registration_now=conflicting_attempt["registration_now"],
-        confirmation_clock=lambda: conflicting_attempt["confirmation_clock"],
+        confirmation_clock=mock_clock,
     )
     post_conflicting_attempt = submission_table.get_item(
         Key={
@@ -1786,6 +1908,7 @@ def test_coordinate_initial_trade_start_conflicting_payload_skips_workflow(
     }
     assert post_conflicting_attempt == stored_record
     client.start_execution.assert_not_called()
+    mock_clock.assert_not_called()
 
 
 def test_coordinate_initial_trade_start_start_error_leaves_unconfirmed(
@@ -3210,7 +3333,7 @@ def test_coordinate_trade_submission_already_confirmed(
             state_machine_arn=STATE_MACHINE_ARN,
             **key,
             trade=trade,
-            recovery_token="token-A",
+            recovery_token="token-B",
             lease_expires_at=150,
             confirmation_clock=lambda: 120,
             now=100,
@@ -3220,8 +3343,7 @@ def test_coordinate_trade_submission_already_confirmed(
 
     update_item.assert_not_called()
     record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
-    assert record["status"] == "START_CONFIRMED"
-    assert record["execution_arn"] == expected_execution_arn
+    assert record == starting_record
     step_functions_client.start_execution.assert_not_called()
     step_functions_client.describe_execution.assert_not_called()
 
