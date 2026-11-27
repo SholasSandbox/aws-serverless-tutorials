@@ -424,7 +424,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             raise ValueError(
                 "TRADE_SUBMISSION_LEASE_SECONDS must be a positive integer."
             )
-
+        step_functions_client = get_step_functions_client()
         table = get_submission_table(table_name)
         attempt = build_submission_attempt(
             lease_duration_seconds=lease_duration_seconds,
@@ -433,7 +433,7 @@ def lambda_handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         return handle_trade_submission(
             event,
             context,
-            step_functions_client=get_step_functions_client(),
+            step_functions_client=step_functions_client,
             state_machine_arn=state_machine_arn,
             tenant_id=tenant_id,
             table=table,
@@ -831,9 +831,8 @@ def coordinate_expired_trade_recovery(
     idempotency_key: str,
     trade: Mapping[str, Any],
     new_recovery_token: str,
-    new_lease_expires_at: int,
-    claim_now: int,
-    confirmation_clock: Callable[[], int],
+    lease_duration_seconds: int,
+    clock: Callable[[], int],
 ) -> str:
     """
     Coordinate recovery of an existing trade submission.
@@ -863,6 +862,8 @@ def coordinate_expired_trade_recovery(
     if record.get("status") == "START_CONFIRMED":
         return "ALREADY_CONFIRMED"
 
+    claim_now = clock()
+    new_lease_expires_at = claim_now + lease_duration_seconds
     lease_claim = claim_expired_recovery_lease(
         table=table,
         tenant_id=tenant_id,
@@ -888,7 +889,7 @@ def coordinate_expired_trade_recovery(
         tenant_id=tenant_id,
         idempotency_key=idempotency_key,
         recovery_token=new_recovery_token,
-        now=confirmation_clock(),
+        now=clock(),
         reconciliation_result=reconciliation_result,
     )
     return confirmation
@@ -945,9 +946,8 @@ def coordinate_trade_submission(
             idempotency_key=idempotency_key,
             trade=trade,
             new_recovery_token=recovery_token,
-            new_lease_expires_at=lease_expires_at,
-            claim_now=now,
-            confirmation_clock=confirmation_clock,
+            lease_duration_seconds=lease_expires_at - now,
+            clock=confirmation_clock,
         )
         return {"status": recovery_status}
 

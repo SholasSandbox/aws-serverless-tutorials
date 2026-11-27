@@ -193,6 +193,14 @@ def test_base64_encoded_json_body_is_decoded_before_workflow_start(
     )
 
     assert response["statusCode"] == 202
+    client.start_execution.assert_called_once()
+    call = client.start_execution.call_args.kwargs
+    assert call["stateMachineArn"] == STATE_MACHINE_ARN
+    assert call["name"] == build_execution_name("TENANT-A", "submission-001")
+    assert json.loads(call["input"]) == {
+        "trade": {"trade_id": "TRD-1001", "product": "POWER", "volume_mwh": 25},
+        "idempotency_key": "submission-001",
+    }
 
 
 def test_missing_trade_field_returns_400_without_starting_workflow(
@@ -407,10 +415,9 @@ def test_unexpected_start_failure_returns_500_without_leaking_details(
     assert "sensitive internal detail" not in response["body"]
 
 
-def test_missing_state_machine_configuration_returns_500_without_sdk_call(
-    submission_table,
-) -> None:
+def test_missing_state_machine_configuration_returns_500_without_sdk_call() -> None:
     client = Mock()
+    table = Mock()
 
     response = handle_trade_submission(
         make_event(),
@@ -418,7 +425,7 @@ def test_missing_state_machine_configuration_returns_500_without_sdk_call(
         step_functions_client=client,
         state_machine_arn="",
         tenant_id="TENANT-A",
-        table=submission_table,
+        table=table,
         recovery_token="token-A",
         lease_expires_at=150,
         now=100,
@@ -426,7 +433,8 @@ def test_missing_state_machine_configuration_returns_500_without_sdk_call(
     )
 
     assert response["statusCode"] == 500
-    client.start_execution.assert_not_called()
+    assert table.mock_calls == []
+    assert client.mock_calls == []
 
 
 def test_execution_name_is_stable_for_same_tenant_and_key() -> None:
@@ -520,7 +528,7 @@ def test_execution_name_is_step_functions_compatible(
     )
 
 
-def test_retry_with_same_idempotency_key_has_stable_workflow_input(
+def test_retry_with_same_key_returns_existing_operation_without_restarting(
     submission_table,
 ) -> None:
     client = Mock()
@@ -1361,14 +1369,6 @@ def test_lambda_handler_forwards_runtime_dependencies(
     fake_table = Mock()
     mock_get_client = Mock(return_value=fake_client)
 
-    mock_clock = Mock(return_value=100)
-
-    monkeypatch.setattr(
-        api_workflow_handoff,
-        "current_epoch_seconds",
-        mock_clock,
-    )
-
     expected_uuid = uuid.UUID("550e8400-e29b-41d4-a716-446655440000")
 
     mock_uuid = Mock(return_value=expected_uuid)
@@ -1380,6 +1380,19 @@ def test_lambda_handler_forwards_runtime_dependencies(
     )
 
     mock_get_table = Mock(return_value=fake_table)
+
+    def sample_initial_time() -> int:
+        mock_get_client.assert_called_once_with()
+        mock_get_table.assert_called_once_with("trade-submissions")
+        return 100
+
+    mock_clock = Mock(side_effect=sample_initial_time)
+
+    monkeypatch.setattr(
+        api_workflow_handoff,
+        "current_epoch_seconds",
+        mock_clock,
+    )
 
     monkeypatch.setattr(
         api_workflow_handoff,
@@ -3040,6 +3053,8 @@ def test_coordinate_expired_trade_recovery_success(submission_table) -> None:
         ),
     }
 
+    clock = Mock(side_effect=[100, 110])
+
     response = coordinate_expired_trade_recovery(
         table=submission_table,
         step_functions_client=step_functions_client,
@@ -3047,9 +3062,8 @@ def test_coordinate_expired_trade_recovery_success(submission_table) -> None:
         **key,
         trade=trade,
         new_recovery_token="token-B",
-        new_lease_expires_at=150,
-        claim_now=100,
-        confirmation_clock=lambda: 110,
+        lease_duration_seconds=50,
+        clock=clock,
     )
 
     assert response == "START_CONFIRMED"
@@ -3061,12 +3075,93 @@ def test_coordinate_expired_trade_recovery_success(submission_table) -> None:
         "lease_expires_at": 150,
         "execution_arn": expected_execution_arn,
     }
+    assert clock.call_count == 2
     assert starting_record != stored_record
     step_functions_client.describe_execution.assert_called_once_with(
         executionArn=expected_execution_arn,
         includedData="ALL_DATA",
     )
     step_functions_client.start_execution.assert_not_called()
+
+
+def test_recovery_rejects_confirmation_after_lease_expiry(submission_table) -> None:
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+    starting_record = {
+        **key,
+        "status": "STARTING",
+        "recovery_token": "token-A",
+        "lease_expires_at": 90,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+    }
+    submission_table.put_item(Item=starting_record)
+
+    execution_name = build_execution_name(**key)
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+
+    clock = Mock(return_value=80)
+    client = Mock()
+    original_get_item = submission_table.get_item
+
+    def read_registry(**kwargs):
+        clock.assert_not_called()
+        response = original_get_item(**kwargs)
+        clock.return_value = 100
+        return response
+
+    def describe_execution(**kwargs):
+        clock.assert_called_once_with()
+        clock.return_value = 165
+        return {
+            "executionArn": expected_execution_arn,
+            "status": "RUNNING",
+            "input": json.dumps(
+                {"trade": trade, "idempotency_key": key["idempotency_key"]}
+            ),
+        }
+
+    client.describe_execution.side_effect = describe_execution
+
+    with (
+        patch.object(submission_table, "get_item", side_effect=read_registry),
+        pytest.raises(ClientError) as exc_info,
+    ):
+        coordinate_expired_trade_recovery(
+            table=submission_table,
+            step_functions_client=client,
+            state_machine_arn=STATE_MACHINE_ARN,
+            **key,
+            trade=trade,
+            new_recovery_token="token-B",
+            lease_duration_seconds=50,
+            clock=clock,
+        )
+
+    assert exc_info.value.response["Error"]["Code"] == "ConditionalCheckFailedException"
+
+    stored_record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert stored_record == {
+        **starting_record,
+        "recovery_token": "token-B",
+        "lease_expires_at": 150,
+    }
+    client.describe_execution.assert_called_once_with(
+        executionArn=expected_execution_arn,
+        includedData="ALL_DATA",
+    )
+    client.start_execution.assert_not_called()
+    assert clock.call_count == 2
 
 
 def test_coordinate_expired_trade_recovery_already_confirmed(submission_table) -> None:
@@ -3094,6 +3189,7 @@ def test_coordinate_expired_trade_recovery_already_confirmed(submission_table) -
         "lease_expires_at": 90,
         "payload_fingerprint": fingerprint_normalised_trade(trade),
     }
+    clock = Mock(side_effect=[100, 110])
     submission_table.put_item(Item=starting_record)
     step_functions_client = Mock()
 
@@ -3104,9 +3200,8 @@ def test_coordinate_expired_trade_recovery_already_confirmed(submission_table) -
         **key,
         trade=trade,
         new_recovery_token="token-B",
-        new_lease_expires_at=150,
-        claim_now=100,
-        confirmation_clock=lambda: 110,
+        lease_duration_seconds=50,
+        clock=clock,
     )
 
     assert response == "ALREADY_CONFIRMED"
@@ -3121,6 +3216,7 @@ def test_coordinate_expired_trade_recovery_already_confirmed(submission_table) -
     assert starting_record == stored_record
     step_functions_client.describe_execution.assert_not_called()
     step_functions_client.start_execution.assert_not_called()
+    clock.assert_not_called()
 
 
 def test_coordinate_expired_trade_recovery_payload_fingerprint_conflict(
@@ -3150,6 +3246,7 @@ def test_coordinate_expired_trade_recovery_payload_fingerprint_conflict(
         "lease_expires_at": 90,
         "payload_fingerprint": fingerprint_normalised_trade(trade),
     }
+    clock = Mock(side_effect=[100, 110])
     submission_table.put_item(Item=starting_record)
     step_functions_client = Mock()
 
@@ -3160,9 +3257,8 @@ def test_coordinate_expired_trade_recovery_payload_fingerprint_conflict(
         **key,
         trade={**trade, "volume_mwh": 50},
         new_recovery_token="token-B",
-        new_lease_expires_at=150,
-        claim_now=100,
-        confirmation_clock=lambda: 110,
+        lease_duration_seconds=50,
+        clock=clock,
     )
 
     assert response == "CONFLICT"
@@ -3170,6 +3266,7 @@ def test_coordinate_expired_trade_recovery_payload_fingerprint_conflict(
     assert starting_record == stored_record
     step_functions_client.describe_execution.assert_not_called()
     step_functions_client.start_execution.assert_not_called()
+    clock.assert_not_called()
 
 
 def test_coordinate_expired_trade_recovery_not_claimed(submission_table) -> None:
@@ -3197,8 +3294,10 @@ def test_coordinate_expired_trade_recovery_not_claimed(submission_table) -> None
         "lease_expires_at": 110,
         "payload_fingerprint": fingerprint_normalised_trade(trade),
     }
+    clock = Mock(side_effect=[100, 110])
     submission_table.put_item(Item=starting_record)
     step_functions_client = Mock()
+
     step_functions_client.describe_execution.return_value = {
         "executionArn": expected_execution_arn,
         "status": "RUNNING",
@@ -3216,9 +3315,8 @@ def test_coordinate_expired_trade_recovery_not_claimed(submission_table) -> None
             **key,
             trade=trade,
             new_recovery_token="token-B",
-            new_lease_expires_at=150,
-            claim_now=100,
-            confirmation_clock=lambda: 110,
+            lease_duration_seconds=50,
+            clock=clock,
         )
 
     update_item.assert_called_once()
@@ -3227,6 +3325,7 @@ def test_coordinate_expired_trade_recovery_not_claimed(submission_table) -> None
     assert starting_record == stored_record
     step_functions_client.describe_execution.assert_not_called()
     step_functions_client.start_execution.assert_not_called()
+    clock.assert_called_once_with()
 
 
 def test_coordinate_expired_trade_recovery_inconclusive(submission_table) -> None:
@@ -3247,8 +3346,9 @@ def test_coordinate_expired_trade_recovery_inconclusive(submission_table) -> Non
         "lease_expires_at": 90,
         "payload_fingerprint": fingerprint_normalised_trade(trade),
     }
-    submission_table.put_item(Item=starting_record)
 
+    clock = Mock(side_effect=[100, 110])
+    submission_table.put_item(Item=starting_record)
     execution_name = build_execution_name(**key)
     expected_execution_arn = (
         "arn:aws:states:eu-west-2:123456789012:"
@@ -3274,9 +3374,8 @@ def test_coordinate_expired_trade_recovery_inconclusive(submission_table) -> Non
             **key,
             trade=trade,
             new_recovery_token="token-B",
-            new_lease_expires_at=150,
-            claim_now=100,
-            confirmation_clock=lambda: 110,
+            lease_duration_seconds=50,
+            clock=clock,
         )
 
     assert response == "INCONCLUSIVE"
@@ -3295,6 +3394,7 @@ def test_coordinate_expired_trade_recovery_inconclusive(submission_table) -> Non
         includedData="ALL_DATA",
     )
     step_functions_client.start_execution.assert_not_called()
+    assert clock.call_count == 2
 
 
 def test_coordinate_expired_trade_recovery_execution_mismatch(submission_table) -> None:
@@ -3315,8 +3415,8 @@ def test_coordinate_expired_trade_recovery_execution_mismatch(submission_table) 
         "lease_expires_at": 90,
         "payload_fingerprint": fingerprint_normalised_trade(trade),
     }
+    clock = Mock(side_effect=[100, 110])
     submission_table.put_item(Item=starting_record)
-
     execution_name = build_execution_name(**key)
     expected_execution_arn = (
         "arn:aws:states:eu-west-2:123456789012:"
@@ -3344,9 +3444,8 @@ def test_coordinate_expired_trade_recovery_execution_mismatch(submission_table) 
             **key,
             trade=trade,
             new_recovery_token="token-B",
-            new_lease_expires_at=150,
-            claim_now=100,
-            confirmation_clock=lambda: 110,
+            lease_duration_seconds=50,
+            clock=clock,
         )
 
     assert response == "INPUT_MISMATCH"
@@ -3365,6 +3464,7 @@ def test_coordinate_expired_trade_recovery_execution_mismatch(submission_table) 
         includedData="ALL_DATA",
     )
     step_functions_client.start_execution.assert_not_called()
+    assert clock.call_count == 2
 
 
 def test_coordinate_expired_trade_recovery_confirmed_payload_conflict(
@@ -3394,6 +3494,7 @@ def test_coordinate_expired_trade_recovery_confirmed_payload_conflict(
         "lease_expires_at": 90,
         "payload_fingerprint": fingerprint_normalised_trade(trade),
     }
+    clock = Mock(side_effect=[100, 110])
     submission_table.put_item(Item=starting_record)
     step_functions_client = Mock()
 
@@ -3407,9 +3508,8 @@ def test_coordinate_expired_trade_recovery_confirmed_payload_conflict(
             **key,
             trade={**trade, "volume_mwh": 50},
             new_recovery_token="token-B",
-            new_lease_expires_at=150,
-            claim_now=100,
-            confirmation_clock=lambda: 110,
+            lease_duration_seconds=50,
+            clock=clock,
         )
     assert response == "CONFLICT"
     update_item.assert_not_called()
@@ -3417,6 +3517,7 @@ def test_coordinate_expired_trade_recovery_confirmed_payload_conflict(
     assert starting_record == stored_record
     step_functions_client.describe_execution.assert_not_called()
     step_functions_client.start_execution.assert_not_called()
+    clock.assert_not_called()
 
 
 def test_coordinate_trade_submission_returned_starts_new_trade(
@@ -3445,6 +3546,8 @@ def test_coordinate_trade_submission_returned_starts_new_trade(
         "startDate": "2026-01-01T00:00:00Z",
     }
 
+    clock = Mock(return_value=120)
+
     with patch.object(
         submission_table, "update_item", wraps=submission_table.update_item
     ) as update_item:
@@ -3456,7 +3559,7 @@ def test_coordinate_trade_submission_returned_starts_new_trade(
             trade=trade,
             recovery_token="token-A",
             lease_expires_at=150,
-            confirmation_clock=lambda: 120,
+            confirmation_clock=clock,
             now=80,
         )
 
@@ -3466,11 +3569,89 @@ def test_coordinate_trade_submission_returned_starts_new_trade(
     }
 
     update_item.assert_called_once()
+    values = update_item.call_args.kwargs["ExpressionAttributeValues"]
+    assert values[":now"] == 120
+    clock.assert_called_once_with()
     record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
     assert record["status"] == "START_CONFIRMED"
     assert record["execution_arn"] == expected_execution_arn
     step_functions_client.start_execution.assert_called_once()
     step_functions_client.describe_execution.assert_not_called()
+
+
+def test_coordinate_trade_submission_samples_fresh_recovery_lease(
+    submission_table,
+) -> None:
+
+    table = submission_table
+
+    key = {
+        "tenant_id": "TENANT-A",
+        "idempotency_key": "SUBMISSION-1001",
+    }
+
+    trade = {
+        "trade_id": "TRD-1001",
+        "product": "POWER",
+        "volume_mwh": 25,
+    }
+    execution_name = build_execution_name(**key)
+    expected_execution_arn = (
+        "arn:aws:states:eu-west-2:123456789012:"
+        f"execution:trade-processing:{execution_name}"
+    )
+    step_functions_client = Mock()
+    step_functions_client.describe_execution.return_value = {
+        "executionArn": expected_execution_arn,
+        "status": "RUNNING",
+        "input": json.dumps(
+            {
+                "trade": trade,
+                "idempotency_key": key["idempotency_key"],
+            }
+        ),
+    }
+
+    clock = Mock(side_effect=[120, 160])
+    starting_record = {
+        **key,
+        "status": "STARTING",
+        "execution_arn": expected_execution_arn,
+        "recovery_token": "token-A",
+        "lease_expires_at": 110,
+        "payload_fingerprint": fingerprint_normalised_trade(trade),
+    }
+    submission_table.put_item(Item=starting_record)
+
+    with patch.object(
+        submission_table, "update_item", wraps=submission_table.update_item
+    ) as update_item:
+        response = coordinate_trade_submission(
+            table=table,
+            step_functions_client=step_functions_client,
+            state_machine_arn=STATE_MACHINE_ARN,
+            **key,
+            trade=trade,
+            recovery_token="token-B",
+            lease_expires_at=150,
+            confirmation_clock=clock,
+            now=100,
+        )
+
+    assert response == {"status": "START_CONFIRMED"}
+
+    record = submission_table.get_item(Key=key, ConsistentRead=True)["Item"]
+    assert update_item.call_count == 2
+    assert record == {
+        **starting_record,
+        "status": "START_CONFIRMED",
+        "recovery_token": "token-B",
+        "lease_expires_at": 170,
+        "execution_arn": expected_execution_arn,
+    }
+    assert clock.call_count == 2
+    step_functions_client.start_execution.assert_not_called()
+    step_functions_client.describe_execution.assert_called_once()
 
 
 def test_coordinate_trade_submission_already_confirmed(
@@ -3564,6 +3745,7 @@ def test_coordinate_trade_submission_returned_recover_claim(
         "lease_expires_at": 90,
         "payload_fingerprint": fingerprint_normalised_trade(trade),
     }
+    clock = Mock(side_effect=[100, 120])
     submission_table.put_item(Item=starting_record)
 
     with patch.object(
@@ -3577,7 +3759,7 @@ def test_coordinate_trade_submission_returned_recover_claim(
             trade=trade,
             recovery_token="token-B",
             lease_expires_at=150,
-            confirmation_clock=lambda: 120,
+            confirmation_clock=clock,
             now=100,
         )
 
@@ -3597,6 +3779,7 @@ def test_coordinate_trade_submission_returned_recover_claim(
         includedData="ALL_DATA",
     )
     step_functions_client.start_execution.assert_not_called()
+    assert clock.call_count == 2
 
 
 def test_coordinate_trade_submission_execution_not_observed(
@@ -3635,6 +3818,7 @@ def test_coordinate_trade_submission_execution_not_observed(
         "payload_fingerprint": fingerprint_normalised_trade(trade),
     }
     submission_table.put_item(Item=starting_record)
+    clock = Mock(side_effect=[100, 120])
 
     with patch.object(
         submission_table, "update_item", wraps=submission_table.update_item
@@ -3647,7 +3831,7 @@ def test_coordinate_trade_submission_execution_not_observed(
             trade=trade,
             recovery_token="token-B",
             lease_expires_at=150,
-            confirmation_clock=lambda: 120,
+            confirmation_clock=clock,
             now=100,
         )
 
@@ -3666,6 +3850,7 @@ def test_coordinate_trade_submission_execution_not_observed(
         includedData="ALL_DATA",
     )
     step_functions_client.start_execution.assert_not_called()
+    assert clock.call_count == 2
 
 
 def test_map_trade_submission_outcome_start_confirmed() -> None:
@@ -3787,7 +3972,8 @@ def test_map_trade_submission_outcome_input_mismatch() -> None:
     [
         pytest.param(None, id="null-input"),
         pytest.param("", id="empty-input"),
-        pytest.param("INVALID", id="whitespace-only-input"),
+        pytest.param("INVALID", id="unknown-status-input"),
+        pytest.param(" \t", id="whitespace-only-input"),
         pytest.param(123, id="non-string-input"),
     ],
 )
@@ -3797,7 +3983,8 @@ def test_map_trade_submission_outcome_unknown_status(status: str) -> None:
     }
 
     with pytest.raises(
-        ValueError, match=f"Unexpected trade submission outcome: {outcome['status']!r}."
+        ValueError,
+        match=re.escape(f"Unexpected trade submission outcome: {outcome['status']!r}."),
     ):
         map_trade_submission_outcome(
             outcome=outcome,
@@ -3846,11 +4033,11 @@ def test_coordinate_trade_submission_routes_match_to_recovery(submission_table) 
     recover.assert_called_once_with(
         **common,
         new_recovery_token="token-B",
-        new_lease_expires_at=130,
-        claim_now=100,
-        confirmation_clock=clock,
+        lease_duration_seconds=30,
+        clock=clock,
     )
     assert response == {"status": "START_CONFIRMED"}
+    clock.assert_not_called()
 
 
 @pytest.mark.parametrize(
